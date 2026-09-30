@@ -1,0 +1,41 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Database
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Exports de conversa do WhatsApp e backups locais (dados de paciente)
+chat*.txt
+uploads/
+*.bak
+
+# Prints e transcricoes trocados por WhatsApp: correspondencia, nao codigo.
+# Imagens do painel ficam em static/.
+/*.jpeg
+/*.jpg
+/*.png
+Audio*.txt

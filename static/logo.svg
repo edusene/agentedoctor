@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 52" role="img" aria-label="Dr. Fabrício Guimarães">
+  <rect width="220" height="52" rx="10" fill="#0f3d5e"/>
+  <g transform="translate(12 10)" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 2c-5 0-8 3-8 8 0 4 1 7 2 11 1 5 2 11 5 11 2 0 2-6 3-9 1 3 1 9 3 9 3 0 4-6 5-11 1-4 2-7 2-11 0-5-3-8-8-8-1.5 0-2.5.6-4 .6S17.5 2 16 2z" transform="translate(-6 -1) scale(.95)"/>
+  </g>
+  <text x="46" y="23" fill="#ffffff" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Dr. Fabrício Guimarães</text>
+  <text x="46" y="39" fill="#9cc7e4" font-family="Inter, Arial, sans-serif" font-size="10.5" font-weight="500">Secretária virtual · Bucomaxilofacial</text>
+</svg>
