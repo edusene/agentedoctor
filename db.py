@@ -41,6 +41,21 @@ def _init_pg_pool():
         _pg_pool = None
 
 
+def _autocommit(conn):
+    """Liga autocommit na conexao do pool.
+
+    Sem ele, cada consulta custava 3 idas e voltas ao banco: o psycopg2 abre
+    BEGIN antes da consulta, e o pool faz ROLLBACK ao receber a conexao de
+    volta de uma leitura (que nunca da commit). Com o Supabase a ~180 ms, isso
+    era ~560 ms por consulta. Cada chamada daqui ja confirma ou descarta
+    sozinha - nenhuma transacao atravessa duas chamadas -, entao o
+    comportamento e o mesmo e sobra 1 ida e volta.
+    """
+    if conn is not None and not conn.closed and not conn.autocommit:
+        conn.autocommit = True
+    return conn
+
+
 def _get_pg_conn():
     """Retorna uma conexão do pool. Reconnecta se necessário."""
     global _pg_pool
@@ -55,13 +70,13 @@ def _get_pg_conn():
         if conn.closed:
             _pg_pool.putconn(conn, close=True)
             conn = _pg_pool.getconn()
-        return conn
+        return _autocommit(conn)
     except Exception:
         # Pool pode ter perdido conexões — reinicializa
         try:
             _init_pg_pool()
             if _pg_pool:
-                return _pg_pool.getconn()
+                return _autocommit(_pg_pool.getconn())
         except Exception:
             pass
         raise
@@ -286,8 +301,10 @@ def table_columns(table_name: str) -> set[str]:
     """Retorna os nomes das colunas de uma tabela."""
     if DB_DRIVER == "postgresql":
         rows = fetch_all(
+            # Só o schema public: no Supabase existe realtime.messages, e as
+            # colunas dela se misturariam às da nossa tabela messages.
             "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = %s", (table_name,)
+            "WHERE table_schema = 'public' AND table_name = %s", (table_name,)
         )
         return {r["column_name"] for r in rows}
     else:

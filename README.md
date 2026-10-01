@@ -43,14 +43,25 @@ python -m venv .venv
 cp .env.example .env                               # e preencha
 ```
 
-Por padrão o banco é **SQLite local** (`secretaria.db`), com embeddings
-guardados como JSON e similaridade calculada em Python. Em produção, use um
-projeto **novo** no Supabase (PostgreSQL + pgvector):
+O banco é o **Supabase** (PostgreSQL + pgvector), projeto `wizduleefiuoeyzjgyck`
+(us-east-2). Conexão pelo Transaction pooler:
 
 ```
 DB_DRIVER=postgresql
-DATABASE_URL=postgresql://...
+DATABASE_URL=postgresql://postgres.wizduleefiuoeyzjgyck:SENHA@aws-0-us-east-2.pooler.supabase.com:6543/postgres?sslmode=require
 ```
+
+A senha vai em percent-encoding se tiver caracteres especiais (`#` → `%23`,
+`@` → `%40`...). Todas as tabelas têm RLS ativo sem políticas: o app conecta
+como `postgres` e acessa tudo; a API pública do Supabase não lê dado nenhum.
+
+Para desenvolvimento offline dá para usar SQLite (`DB_DRIVER=sqlite`,
+`DB_PATH=secretaria.db`), com embeddings em JSON e similaridade em Python. Veja
+[SUPABASE_MIGRATION.md](SUPABASE_MIGRATION.md) para migrar dados entre os dois.
+
+**Latência:** o banco fica em Ohio (EUA). Hospede o app nos EUA (ex.: Render
+em Ohio/Virgínia) para cada consulta levar poucos milissegundos; rodando no
+Brasil, cada consulta custa ~180 ms.
 
 ## Base de conhecimento (RAG)
 
