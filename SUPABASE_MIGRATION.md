@@ -8,8 +8,8 @@ do agente ou do painel depende do driver.
 
 | Item | Valor |
 |---|---|
-| Projeto | `wizduleefiuoeyzjgyck` (organização AgentDoctot, plano free) |
-| Região | us-east-2 (Ohio) |
+| Projeto | `kchcnjhkphxprewoxjtn` — `agentedoctor` (organização AgentDoctot, plano free) |
+| Região | sa-east-1 (São Paulo) — ~36 ms por consulta a partir do Brasil |
 | Conexão | Transaction pooler, porta 6543, `sslmode=require` |
 | pgvector | 0.8.2, no schema `extensions` |
 | RLS | ativo em todas as tabelas `public`, sem políticas |
@@ -35,20 +35,29 @@ do agente ou do painel depende do driver.
    - Os embeddings são copiados sem chamar a OpenAI.
    - O script recusa destino que já tenha dados.
    - No fim, compara origem × destino.
-4. **Segurança** (já aplicado neste projeto, migração `seguranca_vector_e_rls_auto_enable`):
-   ```sql
-   create schema if not exists extensions;
-   alter extension vector set schema extensions;
-   revoke execute on function public.rls_auto_enable() from public, anon, authenticated;
-   ```
-   O RLS nas tabelas é ligado automaticamente pelo gatilho `ensure_rls` do
-   Supabase. Confira em **Advisors → Security**: só deve restar o aviso
+4. **Segurança** (já aplicado neste projeto, migração `seguranca_rls_e_vector`):
+   - RLS ligado em todas as tabelas `public`, sem políticas.
+   - Gatilho `ensure_rls` + função `private.rls_auto_enable()`: toda tabela
+     nova em `public` já nasce com RLS. A função fica fora do schema exposto
+     pela API e sem `EXECUTE` para anon/authenticated.
+   - `vector` movido para o schema `extensions`.
+
+   **Atenção:** projeto criado pela API/MCP **não** vem com RLS automático
+   (o criado pelo painel vem). Sem esse passo, as tabelas ficam legíveis pela
+   chave pública. Confira em **Advisors → Security**: só deve restar o aviso
    informativo "RLS Enabled No Policy", que é o desejado.
 
 ## Rollback
 
 Volte `DB_DRIVER=sqlite` no `.env`. O `secretaria.db` não é alterado pela
 migração e continua sendo o backup local do estado de antes.
+
+## Histórico
+
+- 2026-10-01: primeiro migrado para `wizduleefiuoeyzjgyck` (us-east-2), ~186 ms
+  por consulta a partir do Brasil. Movido para São Paulo no mesmo dia (região
+  não pode ser trocada em projeto existente). O projeto de Ohio foi pausado
+  para liberar a vaga do plano free (limite de 2 projetos ativos por dono).
 
 ## Notas
 

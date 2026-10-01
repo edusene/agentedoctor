@@ -43,12 +43,12 @@ python -m venv .venv
 cp .env.example .env                               # e preencha
 ```
 
-O banco é o **Supabase** (PostgreSQL + pgvector), projeto `wizduleefiuoeyzjgyck`
-(us-east-2). Conexão pelo Transaction pooler:
+O banco é o **Supabase** (PostgreSQL + pgvector), projeto `kchcnjhkphxprewoxjtn`
+(`agentedoctor`, São Paulo / sa-east-1). Conexão pelo Transaction pooler:
 
 ```
 DB_DRIVER=postgresql
-DATABASE_URL=postgresql://postgres.wizduleefiuoeyzjgyck:SENHA@aws-0-us-east-2.pooler.supabase.com:6543/postgres?sslmode=require
+DATABASE_URL=postgresql://postgres.kchcnjhkphxprewoxjtn:SENHA@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require
 ```
 
 A senha vai em percent-encoding se tiver caracteres especiais (`#` → `%23`,
@@ -59,9 +59,9 @@ Para desenvolvimento offline dá para usar SQLite (`DB_DRIVER=sqlite`,
 `DB_PATH=secretaria.db`), com embeddings em JSON e similaridade em Python. Veja
 [SUPABASE_MIGRATION.md](SUPABASE_MIGRATION.md) para migrar dados entre os dois.
 
-**Latência:** o banco fica em Ohio (EUA). Hospede o app nos EUA (ex.: Render
-em Ohio/Virgínia) para cada consulta levar poucos milissegundos; rodando no
-Brasil, cada consulta custa ~180 ms.
+**Latência:** o banco fica em São Paulo, ~36 ms por consulta a partir do
+Brasil (um atendimento faz ~18 consultas, ~0,6 s). Hospede o app no Brasil ou
+perto dele.
 
 ## Base de conhecimento (RAG)
 
