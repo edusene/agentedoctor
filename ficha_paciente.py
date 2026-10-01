@@ -37,7 +37,7 @@ ROTULOS = {
 }
 
 PERGUNTAS = {
-    "nome": "Para começar, com quem eu falo? Qual é o seu nome?",
+    "nome": "Com quem eu falo? Qual é o seu nome?",
     # Seção 16, segundo parágrafo.
     "queixa": ("Para eu te orientar melhor, me conta qual é a sua principal queixa "
                "ou o que você gostaria de tratar."),
@@ -397,3 +397,40 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         return False
     ficha[campo] = bruto[:300]
     return True
+
+
+# Correcao no resumo: "a cidade e Candeias", "meu nome e Ana Paula". O campo
+# certo e reescrito; sem isso a correcao ia para Observacoes e o resumo
+# mostrava os dois valores, o velho e o novo.
+_CAMPOS_CORRIGIVEIS = [
+    ("nome", r"\bnome\b"),
+    ("cidade", r"\bcidade\b|\bmoro\b"),
+    ("disponibilidade", r"\b(horario|horarios|dia|dias|disponibilidade|turno|periodo)\b"),
+    ("tempo_queixa", r"\btempo\b"),
+    ("exames", r"\bexames?\b|\btomografia\b|\bradiografia\b|\blaudo\b"),
+    ("tipo_consulta", r"\bretorno\b|\bprimeira consulta\b"),
+    ("saude", r"\balergia|\bmedicamento|\bremedio|\bdoenca|\bsaude\b"),
+    ("queixa", r"\bqueixa\b"),
+]
+_RX_VALOR_CORRIGIDO = re.compile(
+    r"(?i)\s(?:é|e|eh|:|seria|correta é|certa é|para|pra|na verdade é|em)\s+(.+)$")
+
+
+def aplicar_correcao(ficha: dict, texto: str) -> str:
+    """Aplica a correcao ao campo citado. Devolve o campo, ou "" se nao achou."""
+    t = clinica.normalizar(texto)
+    citados = [c for c, rx in _CAMPOS_CORRIGIVEIS if re.search(rx, t)]
+    if len(citados) != 1:
+        return ""
+    campo = citados[0]
+    if campo == "tipo_consulta":
+        ficha[campo] = "Retorno" if "retorno" in t else "Primeira consulta"
+        return campo
+    m = _RX_VALOR_CORRIGIDO.search(texto or "")
+    if not m:
+        return ""
+    valor = m.group(1).strip().strip(".!")
+    if not valor:
+        return ""
+    ficha[campo] = _titulo(valor) if campo in ("nome", "cidade") else valor[:300]
+    return campo

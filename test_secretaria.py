@@ -122,7 +122,16 @@ class RespostasTravadas(unittest.TestCase):
 
     def test_tumor_nao_significa_cancer(self):
         self.assertEqual(self.texto("Tumor é câncer?", "tumor_cancer"), clinica.RESPOSTA_TUMOR_CANCER)
-        self.assertIn("tumor_cancer", self.tipos("esse cisto pode ser maligno?"))
+        # Sobre o caso do paciente a resposta NUNCA e "Nao" (afirmaria benignidade).
+        for frase in ["esse cisto pode ser maligno?", "minha biópsia pode dar câncer?",
+                      "esse tumor que eu tenho é câncer?", "minha biópsia é câncer?"]:
+            with self.subTest(frase=frase):
+                respostas = clinica.respostas_travadas(frase)
+                self.assertTrue(respostas)
+                self.assertFalse(any(r.startswith("Não.") for _, r in respostas))
+        self.assertIn("pode_ser_maligno", self.tipos("esse cisto pode ser maligno?"))
+        self.assertIn("tumor_cancer", self.tipos("tumor significa câncer?"))
+        self.assertIn("tumor_cancer", self.tipos("Tumor é câncer?"))
 
     def test_diagnostico(self):
         for frase in ["isso é grave?", "o que eu tenho?", "Preciso tirar o siso?", "vou precisar operar?"]:
@@ -140,6 +149,10 @@ class RespostasTravadas(unittest.TestCase):
     def test_exame(self):
         self.assertIn("exame", self.tipos("pode olhar meu raio-x?"))
         self.assertIn("exame", self.tipos("o que significa esse laudo?"))
+
+    def test_cidade_nao_e_pedido_de_exame(self):
+        self.assertNotIn("exame", self.tipos("Oi, sou a Ana, moro em Porto Velho, tenho tomografia"))
+        self.assertIn("exame", self.tipos("pode ver minha tomografia?"))
 
     def test_garantia(self):
         self.assertIn("garantia", self.tipos("tem risco?"))
@@ -295,7 +308,8 @@ class Fluxo(unittest.TestCase):
     def test_correcao_no_resumo(self):
         ficha, saidas = conversa(self.CONVERSA[:-1] + ["não", "a cidade é Trindade", "sim"])
         self.assertIn("corrigir", saidas[-3][2])
-        self.assertIn("Trindade", saidas[-2][2])
+        self.assertIn("• Cidade: Trindade", saidas[-2][2])
+        self.assertNotIn("Goiânia", saidas[-2][2])
         self.assertTrue(saidas[-1][1].encaminhar)
 
     def test_curiosidade_nao_empurra_coleta(self):

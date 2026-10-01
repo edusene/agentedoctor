@@ -131,6 +131,24 @@ def _contexto_rag(texto: str) -> str:
     return trechos
 
 
+def _chave_resposta_aberta(texto: str) -> str:
+    """Chave da resposta travada de uma duvida aberta.
+
+    A primeira resposta aprovada do modelo e guardada e reaproveitada: a mesma
+    pergunta recebe sempre o mesmo texto (o modelo oscila de redacao mesmo
+    com temperatura 0) e nao gasta OpenAI de novo. A versao entra na chave:
+    editar a base ou o prompt gera respostas novas.
+    """
+    import hashlib as _h
+    try:
+        base = knowledge_rag.get_file_content(BASE_CONHECIMENTO_NOME)
+    except Exception:
+        base = ""
+    versao = _h.sha1((_get_current_system_prompt() + base).encode("utf-8")).hexdigest()[:10]
+    pergunta = " ".join(_re_mod.sub(r"[^\w\s]", " ", clinica.normalizar(texto)).split())
+    return f"resposta_aberta:{versao}:{_h.sha1(pergunta.encode('utf-8')).hexdigest()[:16]}"
+
+
 # ── Transfer (transferencia para humano) ──────────────────────────────────────
 
 # Palavras-chave que disparam transferencia ANTES de qualquer outra coisa. A
@@ -830,15 +848,26 @@ def handle_flush(user: str, items: list[dict]) -> None:
         }.get(midia, "[mensagem sem texto]"))
 
         texto_modelo = ""
+        chave_cache = _chave_resposta_aberta(texto) if decisao.usar_llm else ""
         if decisao.usar_llm:
+            texto_modelo = database.get_setting(chave_cache, "")
+            if texto_modelo:
+                print(f"[trava] user={user} duvida aberta respondida do cache (sem OpenAI)")
+        if decisao.usar_llm and not texto_modelo:
             system = (
                 _get_current_system_prompt()
                 + "\n\n=== BASE OFICIAL (trechos recuperados da base de conhecimento) ===\n"
                 + _contexto_rag(texto)
-                + "\n\n" + secretaria.instrucoes_para_modelo(ficha, texto)
+                + "\n\n" + secretaria.instrucoes_para_modelo(ficha_paciente.nova(), texto)
             )
             try:
-                texto_modelo = llm.generate_reply(history=memory.get(user), system=system)
+                # So a pergunta, sem o historico: a resposta vira trava e
+                # tem de valer para qualquer paciente que pergunte o mesmo.
+                texto_modelo = llm.generate_reply(
+                    history=[{"role": "user", "parts": [{"text": texto}]}], system=system)
+                _, _violou = secretaria.montar(secretaria.Decisao(usar_llm=True), texto_modelo)
+                if texto_modelo and not _violou:
+                    database.set_setting(chave_cache, texto_modelo)
             except Exception as e:
                 # Modelo fora do ar (429, rede): a duvida recebe a resposta
                 # travada generica e o funil segue - nunca silencio.

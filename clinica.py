@@ -86,6 +86,14 @@ RESPOSTA_TUMOR_CANCER = (
     "avaliação com o Dr. Fabrício."
 )
 
+# Seção 11 + regra: "pode ser maligno?" NÃO recebe "Não" - isso afirmaria
+# benignidade. O documento diz que podem ser benignas ou malignas.
+RESPOSTA_PODE_SER_MALIGNO = (
+    "Alterações como cistos e tumores podem ser benignas ou malignas, e essa "
+    "definição só é possível com a investigação adequada. Por isso, a avaliação "
+    "do Dr. Fabrício é importante para entender o seu caso."
+)
+
 # Seção 1 + 19: não fechar diagnóstico, não definir indicação cirúrgica.
 RESPOSTA_DIAGNOSTICO = (
     "Não consigo afirmar isso por aqui. Só a avaliação do Dr. Fabrício, com os "
@@ -274,7 +282,7 @@ AREAS: dict[str, dict] = {
             "inclusive de siso. A forma de remoção depende da posição do dente, das "
             "raízes e da complexidade, e isso é definido na avaliação."
         ),
-        "pergunta": "Qual dente é (é o siso?) e você está com dor ou inchaço?",
+        "pergunta": "Qual dente é? E você está com dor ou inchaço?",
     },
     "ortognatica": {
         "nome": "Cirurgia ortognática",
@@ -473,6 +481,16 @@ _RX_NAO_SEI = _rx(
 )
 _RX_CANCER = _rx(r"cancer", r"maligno", r"malign", r"\bcarcinoma")
 _RX_BIOPSIA = _rx(r"biopsia")
+_DEFINE = r"(significa|quer dizer|e sinal de|e sinonimo de|indica|e o mesmo que|tem a ver com|e)"
+_RX_BIOPSIA_SIGNIFICA = _rx(
+    r"^(a |uma |fazer (uma )?|fazer a )?biopsia " + _DEFINE + r" (que (e|tem|seja) )?(um |uma )?(cancer|maligno|tumor maligno)",
+    r"(toda|quem faz) biopsia (e|tem) cancer",
+)
+_RX_TUMOR_SIGNIFICA = _rx(
+    r"^(o )?tumor " + _DEFINE + r" (um |uma )?(cancer|maligno)",
+    r"(todo|toda) (tumor|cisto) (e|e um|vira) cancer",
+    r"(o termo|a palavra) tumor",
+)
 _RX_TUMOR = _rx(r"\btumor", r"\bcisto")
 _RX_DIAGNOSTICO = _rx(
     r"(e|sera|pode ser|seria|acha que e|voce acha) (cancer|grave|maligno|benigno|perigoso|serio)",
@@ -504,7 +522,8 @@ _RX_MEDICAMENTO = _rx(
     r"cetoprofeno", r"diclofenaco", r"dexametasona", r"tylenol", r"novalgina",
 )
 _RX_EXAME = _rx(
-    r"(olha|ve|veja|avalia|analisa|analise|interpreta|le|leia|confere).{0,25}(exame|laudo|raio|rx|tomografia|radiografia|panoramica|resultado)",
+    r"\b(olha|olhar|ve|ver|veja|avalia|avaliar|analisa|analisar|analise|interpreta|interpretar|le|ler|leia|confere|conferir)\b"
+    r"(?: \w+){0,4} (exame|exames|laudo|raio|rx|tomografia|radiografia|panoramica|resultado)",
     r"o que (significa|quer dizer|diz).{0,30}(exame|laudo|raio|rx|tomografia|radiografia|panoramica|resultado)",
     r"(meu|o) (exame|laudo|resultado) (deu|mostrou|mostra|diz|esta)",
 )
@@ -574,11 +593,16 @@ def respostas_travadas(texto: str) -> list[tuple[str, str]]:
     t = normalizar(texto)
     saida: list[tuple[str, str]] = []
 
-    # Câncer primeiro: é a dúvida crítica, com resposta própria (seções 3 e 11).
-    if _RX_CANCER.search(t) and _RX_BIOPSIA.search(t):
+    # Câncer primeiro: é a dúvida crítica (seções 3 e 11). O "Não" do
+    # documento responde só à DEFINIÇÃO ("biópsia significa câncer?"). Sobre o
+    # caso do paciente ("pode ser maligno?", "a biópsia deu câncer?") a
+    # resposta nunca é "não": seria afirmar benignidade sem diagnóstico.
+    if _RX_BIOPSIA_SIGNIFICA.search(t):
         saida.append(("biopsia_cancer", RESPOSTA_BIOPSIA_CANCER))
-    elif _RX_CANCER.search(t) and _RX_TUMOR.search(t):
+    elif _RX_TUMOR_SIGNIFICA.search(t):
         saida.append(("tumor_cancer", RESPOSTA_TUMOR_CANCER))
+    elif _RX_CANCER.search(t) and _RX_TUMOR.search(t):
+        saida.append(("pode_ser_maligno", RESPOSTA_PODE_SER_MALIGNO))
     elif _RX_NAO_SEI.search(t) and not _RX_CANCER.search(t):
         pass  # "nao sei qual procedimento preciso" tem resposta propria (secao 17)
     elif (_RX_CANCER.search(t) or _RX_DIAGNOSTICO.search(t)

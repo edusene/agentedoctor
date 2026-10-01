@@ -120,7 +120,9 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
         fp.extrair_passivo(ficha, texto)
         d.tipos.append("emergencia")
         d.partes.append(clinica.RESPOSTA_EMERGENCIA)
-        d.transferir = f"POSSIVEL EMERGENCIA - paciente relatou: {texto[:200]}"
+        relato = (f"confirmou sinais de gravidade apos trauma ({ficha.get('queixa', '')[:120]})"
+                  if gravidade_confirmada else f"relatou: {texto[:200]}")
+        d.transferir = f"POSSIVEL EMERGENCIA - paciente {relato}"
         return fechar()
 
     # ── 2. Mídia ──────────────────────────────────────────────────────────────
@@ -143,7 +145,8 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     # ── 3. Confirmação do resumo (seção 18: CONFIRMAÇÃO) ─────────────────────
     if ficha.get("status") == "aguardando_confirmacao" and not midia:
         if ficha.get("ultima_pergunta") == "correcao":
-            ficha["observacoes"] = (f"{ficha.get('observacoes', '')} {texto}").strip()[:500]
+            if not fp.aplicar_correcao(ficha, texto):
+                ficha["observacoes"] = (f"{ficha.get('observacoes', '')} {texto}").strip()[:500]
             d.tipos.append("correcao")
             d.partes.append("Anotado.")
             d.partes.append(fp.resumo(ficha))
