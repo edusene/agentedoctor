@@ -579,6 +579,8 @@ def respostas_travadas(texto: str) -> list[tuple[str, str]]:
         saida.append(("biopsia_cancer", RESPOSTA_BIOPSIA_CANCER))
     elif _RX_CANCER.search(t) and _RX_TUMOR.search(t):
         saida.append(("tumor_cancer", RESPOSTA_TUMOR_CANCER))
+    elif _RX_NAO_SEI.search(t) and not _RX_CANCER.search(t):
+        pass  # "nao sei qual procedimento preciso" tem resposta propria (secao 17)
     elif (_RX_CANCER.search(t) or _RX_DIAGNOSTICO.search(t)
           or (_RX_INDICACAO_PERGUNTA.search(t) and _e_pergunta(texto, t))):
         saida.append(("diagnostico", RESPOSTA_DIAGNOSTICO))

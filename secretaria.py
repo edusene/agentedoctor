@@ -243,6 +243,11 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
 
 
 def _proximo_passo(ficha: dict, d: Decisao, cobre_queixa: bool) -> None:
+    # A resposta da secao 17 ja pede que o paciente conte a queixa: nenhuma
+    # outra pergunta na mesma mensagem, e a resposta dele vira a queixa.
+    if cobre_queixa and not ficha.get("queixa"):
+        fp.marcar_pergunta(ficha, "queixa")
+        return
     # Seção 13: curiosidade = responder e orientar, sem empurrar coleta.
     if (ficha.get("intencao") == "curiosidade" and not ficha.get("queixa")
             and not ficha.get("nome") and (d.partes or d.usar_llm)

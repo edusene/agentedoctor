@@ -17,6 +17,18 @@ import secretaria
 TARDE = datetime(2026, 9, 30, 15, 0, tzinfo=timezone(timedelta(hours=-3)))
 
 
+def setUpModule():
+    """Testa o comportamento PADRAO, sem os dados do consultorio do .env.
+
+    Os imports acima carregam o .env (db.py); o que o consultorio preencheu
+    la (valor, endereco, nome da assistente) mudaria as respostas esperadas.
+    """
+    import os
+    for chave in [k for k in os.environ if k.startswith("CLINICA_")]:
+        del os.environ[chave]
+    secretaria.AGENTE_NOME = ""
+
+
 def conversa(mensagens, ficha=None):
     """Roda a conversa só pela camada de código. Devolve (ficha, [(msg, decisao, texto)])."""
     ficha = ficha or fp.nova("5562999999999")
@@ -102,7 +114,7 @@ class RespostasTravadas(unittest.TestCase):
         self.assertIn("voce_faz", self.tipos("O doutor faz mentoplastia?"))
 
     def test_nao_sei_secao_17(self):
-        self.assertIn("nao_sei", self.tipos("Não sei qual procedimento preciso"))
+        self.assertEqual(self.tipos("Não sei qual procedimento preciso"), ["nao_sei"])
 
     def test_biopsia_nao_significa_cancer(self):
         self.assertEqual(self.texto("Biópsia significa câncer?", "biopsia_cancer"),
@@ -260,6 +272,13 @@ class Fluxo(unittest.TestCase):
         self.assertEqual(ficha["intencao"], "pronto_agendar")
         # Pronto para agendar: pula a pergunta de detalhe e vai para a coleta.
         self.assertEqual(ficha["ultima_pergunta"], "tempo_queixa")
+
+    def test_nao_sei_espera_a_queixa(self):
+        ficha, saidas = conversa(["Não sei qual procedimento preciso", "meu queixo é pequeno"])
+        self.assertEqual(saidas[0][1].pergunta_final, "")
+        self.assertIn(clinica.RESPOSTA_NAO_SEI, saidas[0][2])
+        self.assertEqual(ficha["queixa"], "meu queixo é pequeno")
+        self.assertEqual(ficha["area"], "mentoplastia")
 
     def test_resposta_que_nao_e_nome_nao_vira_nome(self):
         ficha, _ = conversa(["Oi", "Preciso tirar o siso"])
