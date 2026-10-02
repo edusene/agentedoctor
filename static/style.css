@@ -3723,7 +3723,9 @@ select option {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    overflow: hidden;
+    /* Tela estreita: rola na horizontal em vez de espremer e cortar colunas */
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 .crm-table {
@@ -3791,6 +3793,25 @@ select option {
 .crm-table .col-action { width: 10%; }
 .crm-table .col-result { width: 10%; }
 .crm-table .col-error { width: 12%; color: #ef4444; }
+
+/* Tabela de Contatos do CRM: larguras proprias (as col-* sao compartilhadas
+   com Follow-ups e Logs). Status ganha espaco para "Agendamento Solicitado". */
+.crm-table-contatos { min-width: 860px; }
+.crm-table-contatos .col-name { width: 21%; }
+.crm-table-contatos .col-phone { width: 15%; }
+.crm-table-contatos .col-status { width: 21%; }
+.crm-table-contatos .col-tags { width: 12%; }
+.crm-table-contatos .col-date { width: 16%; }
+.crm-table-contatos .col-days { width: 15%; }
+.crm-table-contatos td:last-child { text-align: center; }
+
+/* Selo de status dentro de tabela: quebra linha em vez de ser cortado */
+.crm-table .crm-status-badge {
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.35;
+    padding: 3px 10px;
+}
 
 /* CRM Status Badges */
 .crm-status-badge {

@@ -3296,7 +3296,7 @@ async function loadCrmContacts() {
 
     list.innerHTML = `
         <div class="crm-table-container">
-            <table class="crm-table">
+            <table class="crm-table crm-table-contatos">
                 <thead><tr><th class="col-name">Nome</th><th class="col-phone">Telefone</th><th class="col-status">Status</th><th class="col-tags">Tags</th><th class="col-date">Ultima Interacao</th><th class="col-days">Dias s/ Interacao</th></tr></thead>
                 <tbody>
                 ${crmContactsList.map(c => {
