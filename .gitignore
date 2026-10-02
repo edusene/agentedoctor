@@ -41,3 +41,5 @@ uploads/
 /*.jpg
 /*.png
 Audio*.txt
+/*.ogg
+/*.opus

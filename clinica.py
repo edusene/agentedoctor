@@ -220,6 +220,8 @@ AREAS: dict[str, dict] = {
         ),
         "acolhimento": "Sinto muito pelo ocorrido.",
         "pergunta": "Quando aconteceu e você já foi atendido(a) em algum hospital?",
+        "pergunta_exames": "Você fez tomografia ou radiografia depois do trauma?",
+        "pergunta_indicacao": "Algum médico ou dentista já confirmou se houve fratura?",
     },
     "patologia": {
         "nome": "Cistos e tumores odontogênicos",
@@ -234,7 +236,9 @@ AREAS: dict[str, dict] = {
             "avaliação especializada. O Dr. Fabrício vai analisar os exames e "
             "definir a investigação adequada."
         ),
-        "pergunta": "Quem identificou e em qual exame? Você tem o laudo?",
+        "pergunta": "Em qual região fica? Você sente dor, aumento de volume ou alteração de sensibilidade?",
+        "pergunta_exames": "Em qual exame isso apareceu (radiografia, tomografia)? Você tem o laudo?",
+        "pergunta_indicacao": "Quem identificou essa alteração: dentista ou médico? Já foi feita biópsia?",
     },
     "biopsia": {
         "nome": "Biópsias",
@@ -252,6 +256,8 @@ AREAS: dict[str, dict] = {
             "necessidade de investigação."
         ),
         "pergunta": "Onde fica essa alteração? Ela cresceu, dói ou sangra?",
+        "pergunta_exames": "Você tem algum exame ou encaminhamento sobre essa alteração?",
+        "pergunta_indicacao": "Algum dentista ou médico já viu essa alteração ou recomendou biópsia?",
     },
     "enxerto": {
         "nome": "Enxerto ósseo",
@@ -267,6 +273,8 @@ AREAS: dict[str, dict] = {
             "do Dr. Fabrício."
         ),
         "pergunta": "É para colocar implante? Em qual região e quando você perdeu o dente?",
+        "pergunta_exames": "Você já tem tomografia da região?",
+        "pergunta_indicacao": "Quem te informou sobre a perda de osso: seu dentista ou implantodontista?",
     },
     "exodontia": {
         "nome": "Exodontias / extrações",
@@ -283,6 +291,8 @@ AREAS: dict[str, dict] = {
             "raízes e da complexidade, e isso é definido na avaliação."
         ),
         "pergunta": "Qual dente é? E você está com dor ou inchaço?",
+        "pergunta_exames": "Você já tem radiografia (panorâmica) ou tomografia desse dente?",
+        "pergunta_indicacao": "Foi o seu dentista que indicou a extração, ou você veio por conta própria?",
     },
     "ortognatica": {
         "nome": "Cirurgia ortognática",
@@ -299,6 +309,8 @@ AREAS: dict[str, dict] = {
             "ortodontista. Só a avaliação define o tratamento indicado."
         ),
         "pergunta": "Você usa ou já usou aparelho ortodôntico? Tem ortodontista?",
+        "pergunta_exames": "Você já tem exames ou planejamento feitos com o ortodontista?",
+        "pergunta_indicacao": "Você já recebeu indicação de cirurgia ortognática ou já consultou um cirurgião bucomaxilofacial?",
     },
     "mentoplastia": {
         "nome": "Mentoplastia",
@@ -315,6 +327,8 @@ AREAS: dict[str, dict] = {
             "também envolve a mordida."
         ),
         "pergunta": "O incômodo é mais de frente ou de perfil? Você percebe alguma alteração na mordida?",
+        "pergunta_exames": "Você possui exames da face ou da mordida?",
+        "pergunta_indicacao": "Você já fez cirurgia ortognática ou outra avaliação sobre o queixo?",
     },
     "lift_facial": {
         "nome": "Lift facial / Facelift",
@@ -330,6 +344,8 @@ AREAS: dict[str, dict] = {
             "qualquer tratamento."
         ),
         "pergunta": "O que mais te incomoda é a flacidez ou a perda de volume? Em qual região?",
+        "pergunta_exames": "Você tem alguma avaliação ou exame anterior sobre isso?",
+        "pergunta_indicacao": "Você já fez procedimentos ou cirurgias faciais antes?",
     },
     "lift_cervical": {
         "nome": "Lift cervical",
@@ -345,6 +361,8 @@ AREAS: dict[str, dict] = {
             "melhor abordagem."
         ),
         "pergunta": "O que mais incomoda no pescoço: a flacidez da pele, a gordura ou o contorno?",
+        "pergunta_exames": "Você tem alguma avaliação ou exame anterior sobre isso?",
+        "pergunta_indicacao": "Você já fez algum procedimento no rosto ou no pescoço?",
     },
     "papada": {
         "nome": "Lipo de papada",
@@ -360,6 +378,8 @@ AREAS: dict[str, dict] = {
             "Fabrício é importante antes de definir qualquer tratamento."
         ),
         "pergunta": "Você percebe mais gordura, flacidez ou excesso de pele nessa região?",
+        "pergunta_exames": "Você tem alguma avaliação ou exame anterior sobre isso?",
+        "pergunta_indicacao": "Você já fez algum procedimento na região da papada?",
     },
 }
 

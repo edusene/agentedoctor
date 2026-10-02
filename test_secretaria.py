@@ -227,9 +227,9 @@ class Fluxo(unittest.TestCase):
         "Maria Silva",
         "Preciso tirar o siso",
         "o de baixo, está doendo um pouco",
-        "há 2 meses",
-        "sim, meu dentista pediu",
         "tenho panorâmica",
+        "sim, meu dentista pediu",
+        "há 2 meses",
         "Goiânia",
         "terças à tarde",
         "primeira",
@@ -245,7 +245,10 @@ class Fluxo(unittest.TestCase):
         self.assertTrue(textos[1].startswith("Prazer, Maria!"))
         self.assertIn(clinica.AREAS["exodontia"]["acolhimento"], textos[2])
         self.assertIn(clinica.AREAS["exodontia"]["pergunta"], textos[2])
-        self.assertIn(fp.PERGUNTAS["tempo_queixa"], textos[3])
+        # Pre-requisitos da extracao logo depois da queixa (audio do responsavel).
+        self.assertIn(clinica.AREAS["exodontia"]["pergunta_exames"], textos[3])
+        self.assertIn(clinica.AREAS["exodontia"]["pergunta_indicacao"], textos[4])
+        self.assertIn(fp.PERGUNTAS["tempo_queixa"], textos[5])
         self.assertIn("Confira os dados da sua solicitação", textos[10])
         self.assertIn(fp.PERGUNTA_CONFIRMACAO, textos[10])
         self.assertIn(clinica.RESPOSTA_ENCAMINHADO, textos[11])
@@ -283,8 +286,9 @@ class Fluxo(unittest.TestCase):
         self.assertEqual(ficha["cidade"], "Anápolis")
         self.assertTrue(ficha["exames"].startswith("Sim"))
         self.assertEqual(ficha["intencao"], "pronto_agendar")
-        # Pronto para agendar: pula a pergunta de detalhe e vai para a coleta.
-        self.assertEqual(ficha["ultima_pergunta"], "tempo_queixa")
+        # Pronto para agendar: pula a pergunta de detalhe; exame ja informado,
+        # entao o proximo pre-requisito e a indicacao.
+        self.assertEqual(ficha["ultima_pergunta"], "avaliacao_previa")
 
     def test_nao_sei_espera_a_queixa(self):
         ficha, saidas = conversa(["Não sei qual procedimento preciso", "meu queixo é pequeno"])
@@ -292,6 +296,21 @@ class Fluxo(unittest.TestCase):
         self.assertIn(clinica.RESPOSTA_NAO_SEI, saidas[0][2])
         self.assertEqual(ficha["queixa"], "meu queixo é pequeno")
         self.assertEqual(ficha["area"], "mentoplastia")
+
+    def test_prerequisitos_por_procedimento(self):
+        """Cada area pergunta os proprios pre-requisitos, nao a pergunta generica."""
+        for area, queixa in [("enxerto", "Não tenho osso para implante"),
+                             ("ortognatica", "Minha mordida não encaixa"),
+                             ("patologia", "Tenho um cisto na mandíbula"),
+                             ("papada", "Tenho papada")]:
+            with self.subTest(area=area):
+                ficha, saidas = conversa(["Oi", "Ana", queixa, "detalhe qualquer", "não"])
+                self.assertIn(clinica.AREAS[area]["pergunta_exames"], saidas[3][2])
+                self.assertIn(clinica.AREAS[area]["pergunta_indicacao"], saidas[4][2])
+
+    def test_indicacao_do_dentista_e_reconhecida(self):
+        ficha, _ = conversa(["Oi, vim por indicação do meu dentista para tirar o siso"])
+        self.assertEqual(ficha["avaliacao_previa"], "Sim")
 
     def test_resposta_que_nao_e_nome_nao_vira_nome(self):
         ficha, _ = conversa(["Oi", "Preciso tirar o siso"])

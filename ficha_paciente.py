@@ -17,9 +17,13 @@ import database
 
 # Ordem da seção 14. "telefone" vem do próprio WhatsApp e nunca é perguntado;
 # "detalhe_area" é a pergunta específica da área provável (seções 2 a 11).
+# Exames e indicacao vem logo depois da queixa: sao os pre-requisitos de cada
+# procedimento ("ja fez a radiografia? veio de indicacao de dentista?"), e a
+# pergunta muda conforme a area (clinica.AREAS[...]["pergunta_exames"/
+# "pergunta_indicacao"]).
 ORDEM = [
-    "nome", "queixa", "detalhe_area", "tempo_queixa", "avaliacao_previa",
-    "exames", "cidade", "disponibilidade", "tipo_consulta", "saude",
+    "nome", "queixa", "detalhe_area", "exames", "avaliacao_previa",
+    "tempo_queixa", "cidade", "disponibilidade", "tipo_consulta", "saude",
 ]
 
 ROTULOS = {
@@ -28,7 +32,7 @@ ROTULOS = {
     "queixa": "Queixa principal",
     "detalhe_area": "Detalhes",
     "tempo_queixa": "Há quanto tempo",
-    "avaliacao_previa": "Já passou por avaliação",
+    "avaliacao_previa": "Avaliação/indicação",
     "exames": "Exames/encaminhamento",
     "cidade": "Cidade",
     "disponibilidade": "Disponibilidade",
@@ -42,7 +46,7 @@ PERGUNTAS = {
     "queixa": ("Para eu te orientar melhor, me conta qual é a sua principal queixa "
                "ou o que você gostaria de tratar."),
     "tempo_queixa": "Há quanto tempo você tem essa queixa?",
-    "avaliacao_previa": "Você já passou por avaliação com algum dentista ou médico por causa disso?",
+    "avaliacao_previa": "Algum dentista ou médico já avaliou isso ou indicou o atendimento?",
     "exames": "Você tem exames (radiografia, tomografia, laudo) ou algum encaminhamento?",
     "cidade": "Em qual cidade você mora?",
     "disponibilidade": "Quais dias e horários ficam melhores para você vir à avaliação?",
@@ -123,9 +127,20 @@ def faltando(ficha: dict) -> list[str]:
     return [c for c in ORDEM if _campo_aplicavel(ficha, c) and not ficha.get(c)]
 
 
+_PERGUNTA_DA_AREA = {
+    "detalhe_area": "pergunta",
+    "exames": "pergunta_exames",
+    "avaliacao_previa": "pergunta_indicacao",
+}
+
+
 def pergunta_do_campo(ficha: dict, campo: str) -> str:
-    if campo == "detalhe_area":
-        return clinica.AREAS.get(ficha.get("area"), {}).get("pergunta", "")
+    """Pergunta do campo. Com area identificada, a da area tem preferencia."""
+    chave = _PERGUNTA_DA_AREA.get(campo)
+    if chave:
+        da_area = clinica.AREAS.get(ficha.get("area"), {}).get(chave, "")
+        if da_area or campo == "detalhe_area":
+            return da_area
     return PERGUNTAS.get(campo, "")
 
 
@@ -206,7 +221,10 @@ _RX_EXAME_NAO = re.compile(
     r"\bnao (?:tenho|fiz|possuo)\s+(?:nenhum |nenhuma )?(?:exame|tomografia|radiografia|raio|laudo|encaminhamento)"
 )
 _RX_AVALIACAO_SIM = re.compile(
-    r"\b(?:meu|minha|o|a) (?:dentista|ortodontista|medico|medica|doutor|doutora)\s+"
+    r"\b(?:vim|venho|fui|cheguei) (?:por|com|atraves de) (?:uma )?indicacao"
+    r"|\bindicacao (?:do|da) (?:meu |minha )?(?:dentista|ortodontista|medico|medica|implantodontista)"
+    r"|\b(?:dentista|ortodontista|medico|medica|implantodontista) (?:me )?(?:indicou|encaminhou|mandou|pediu)"
+    r"|\b(?:meu|minha|o|a) (?:dentista|ortodontista|medico|medica|doutor|doutora)\s+"
     r"(?:disse|falou|pediu|mandou|encaminhou|indicou|viu|solicitou|recomendou)"
     r"|\bja (?:passei|fui|consultei) (?:em|no|na|por|ao|a|com) (?:um |uma )?(?:dentista|medico|avaliacao|consulta|ortodontista|cirurgiao)"
 )
