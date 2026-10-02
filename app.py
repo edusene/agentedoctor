@@ -526,6 +526,11 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
     conv = database.get_or_create_conversation(phone)
     database.update_conversation(conv["id"], transferred_at=now)
 
+    # Fila Humana conta conversas em modo humano COM nao lidas. O agente zera
+    # as nao lidas a cada resposta, entao sem isto a transferencia nunca
+    # acendia o badge (teste de 02/10).
+    database.mark_unread(conv["id"])
+
     reason_log = f" Motivo: {reason}" if reason else ""
     print(f"[transfer] user={phone} transferido para humano.{reason_log}")
 
@@ -786,6 +791,12 @@ def _registrar_encaminhamento(user: str, ficha: dict) -> None:
     try:
         contact = database.get_contact(user) or database.upsert_contact(user)
         database.create_task(contact["id"], titulo, descricao)
+        # CRM: status proprio e a ficha nas observacoes do contato. A tarefa
+        # sozinha nao aparecia em lugar nenhum do painel (teste de 02/10).
+        notas = (contact.get("notes") or "").strip()
+        bloco = f"[{datetime.utcnow().strftime('%d/%m/%Y')}] {titulo}\n{descricao}"
+        database.update_contact(contact["id"], crm_status="agendamento",
+                                notes=f"{notas}\n\n{bloco}".strip())
         conv = database.get_or_create_conversation(user)
         database.save_message(
             conversation_id=conv["id"], phone=user, direction="internal",
@@ -894,6 +905,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
         elif decisao.encaminhar:
             _registrar_encaminhamento(user, ficha)
 
+        # Transferida, a conversa fica NAO LIDA para a equipe: e o que acende
+        # o badge da Fila Humana. Zerar aqui apagava o aviso da transferencia.
+        if decisao.transferir or decisao.encaminhar:
+            return
         try:
             conv = database.get_or_create_conversation(user)
             database.reset_unread(conv["id"])
@@ -2664,7 +2679,7 @@ def api_crm_contact_detail(contact_id):
 def api_crm_contact_update_status(contact_id):
     data = request.get_json(silent=True) or {}
     status = data.get("status", "")
-    if status not in ("novo", "em_atendimento", "cliente", "inativo", "nao_interessado", ""):
+    if status not in ("novo", "em_atendimento", "agendamento", "cliente", "inativo", "nao_interessado", ""):
         return jsonify({"error": "invalid status"}), 400
     database.update_contact(contact_id, crm_status=status)
     return jsonify({"ok": True})

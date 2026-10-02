@@ -3190,7 +3190,7 @@ let crmContactProfileId = null;
 
 /* ── CRM Status Labels ─────────────────────────────────────────────────────── */
 const CRM_STATUS = {
-    novo: 'Novo', em_atendimento: 'Em Atendimento', cliente: 'Cliente',
+    novo: 'Novo', em_atendimento: 'Em Atendimento', agendamento: 'Agendamento Solicitado', cliente: 'Cliente',
     inativo: 'Inativo', nao_interessado: 'Nao Interessado'
 };
 const CRM_FOLLOWUP_STATUS = {
@@ -3238,6 +3238,11 @@ async function loadCrmDashboard() {
             <div class="stat-icon" style="color:#22c55e"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
             <div class="stat-value">${stats.novo}</div>
             <div class="stat-label">Novos</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="color:#0ea5e9"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+            <div class="stat-value">${stats.agendamento || 0}</div>
+            <div class="stat-label">Agendamentos a confirmar</div>
         </div>
         <div class="stat-card">
             <div class="stat-icon" style="color:#6366f1"><svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72"/></svg></div>
@@ -3377,6 +3382,21 @@ async function openCrmContactProfile(contactId) {
                 <button class="btn-sm btn-primary" style="margin-top:4px" onclick="saveCrmNotes(${data.id})">Salvar</button>
             </div>
         </div>
+        ${(data.tasks || []).length > 0 ? `
+        <div class="crm-profile-card">
+            <h3>Tarefas</h3>
+            ${data.tasks.map(t => `
+                <div class="crm-task ${t.status === 'done' ? 'crm-task-done' : ''}">
+                    <div class="crm-task-head">
+                        <strong>${esc(t.title)}</strong>
+                        ${t.status === 'done'
+                            ? '<span class="muted">Concluída</span>'
+                            : `<button class="btn-sm btn-primary" onclick="concluirCrmTask(${t.id}, ${data.id})">Concluir</button>`}
+                    </div>
+                    <pre class="crm-task-desc">${esc(t.description || '')}</pre>
+                </div>
+            `).join('')}
+        </div>` : ''}
         ${(data.follow_ups || []).length > 0 ? `
         <div class="crm-profile-card">
             <h3>Follow-ups</h3>
@@ -3413,6 +3433,16 @@ async function openCrmContactProfile(contactId) {
                 }</div>`;
             }
         }
+    }
+}
+
+async function concluirCrmTask(taskId, contactId) {
+    const r = await api(`/api/tasks/${taskId}`, { method: 'PUT', body: JSON.stringify({ status: 'done' }) });
+    if (r && r.ok) {
+        toast('Tarefa concluída', 'success');
+        openCrmContactProfile(contactId);
+    } else {
+        toast('Erro ao concluir tarefa', 'error');
     }
 }
 

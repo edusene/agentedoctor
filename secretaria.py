@@ -60,7 +60,9 @@ _SO_CUMPRIMENTO = re.compile(
 
 
 def e_so_cumprimento(texto: str) -> bool:
-    return bool(_SO_CUMPRIMENTO.match(clinica.normalizar(texto)))
+    # Sem pontuação: "Olá, boa noite" tem de casar igual a "ola boa noite".
+    sem_pontuacao = re.sub(r"[^\w\s]", " ", clinica.normalizar(texto))
+    return bool(_SO_CUMPRIMENTO.match(" ".join(sem_pontuacao.split())))
 
 
 def tem_duvida_aberta(texto: str) -> bool:
@@ -71,6 +73,7 @@ def tem_duvida_aberta(texto: str) -> bool:
 @dataclass
 class Decisao:
     partes: list[str] = field(default_factory=list)   # texto travado, em ordem
+    confirmacao: str = ""                              # "Entendi." antes da pergunta
     usar_llm: bool = False                             # há dúvida aberta p/ o modelo
     pergunta_final: str = ""                           # fecha a mensagem
     transferir: str = ""                               # motivo, se transfere
@@ -222,7 +225,8 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
         d.partes.append(clinica.AREAS[area]["acolhimento"])
 
     # ── 8. Dúvida aberta que nada acima respondeu: vai para o modelo ─────────
-    if texto and not travadas and tem_duvida_aberta(texto):
+    # Cumprimento com "?" ("oi, tudo bem?") nao e duvida: nao vai ao modelo.
+    if texto and not travadas and tem_duvida_aberta(texto) and not e_so_cumprimento(texto):
         d.usar_llm = True
         d.tipos.append("llm")
     elif (texto and not travadas and not capturou and not mudou and not midia
@@ -233,16 +237,44 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
         d.tipos.append("llm_livre")
 
     if capturou and not d.partes and not d.usar_llm:
-        if ultima == "nome" and ficha.get("nome"):
-            d.partes.append(f"Prazer, {ficha['nome'].split()[0]}!")
-        elif ultima == "sinais_gravidade":
-            d.partes.append("Certo, obrigado por responder.")
-        else:
-            d.partes.append("Certo, anotado.")
+        d.confirmacao = _confirmacao(ultima, ficha)
+    elif texto and e_so_cumprimento(texto) and not abertura and not d.partes:
+        # "Boa noite" no meio do atendimento: responde ao cumprimento antes de
+        # repetir a pergunta, em vez de ignora-lo (teste de 02/10).
+        d.confirmacao = f"{saudacao(momento)}!"
 
     # ── 9. Próximo passo do funil ─────────────────────────────────────────────
     _proximo_passo(ficha, d, cobre_queixa)
     return fechar()
+
+
+def _confirmacao(campo: str, ficha: dict) -> str:
+    """Confirmacao curta da resposta, diferente para cada campo.
+
+    Era "Certo, anotado." para tudo, em bolha propria: 9 vezes iguais numa
+    conversa so (teste de 02/10). Cada campo tem a sua frase e ela vai na
+    mesma mensagem da pergunta seguinte. Fixa por campo: nada oscila.
+    """
+    valor = clinica.normalizar(ficha.get(campo, ""))
+    if campo == "nome" and ficha.get("nome"):
+        return f"Prazer, {ficha['nome'].split()[0]}!"
+    if campo == "sinais_gravidade":
+        return "Obrigada por responder."
+    if campo == "exames":
+        return ("Sem problema, isso pode ser visto na avaliação." if valor.startswith("nao")
+                else "Ótimo, leve no dia da avaliação.")
+    if campo == "avaliacao_previa":
+        return ("Tudo bem." if valor.startswith("nao")
+                else "Ótimo, isso ajuda o Dr. Fabrício a entender o seu caso.")
+    return {
+        "queixa": "Entendi.",
+        "detalhe_area": "Obrigada pelos detalhes.",
+        "tempo_queixa": "Entendi.",
+        "cidade": "Perfeito.",
+        "disponibilidade": "Vou deixar a sua preferência registrada.",
+        "tipo_consulta": "Certo.",
+        "saude": "Obrigada pelas informações.",
+    }.get(campo, "")
 
 
 def _proximo_passo(ficha: dict, d: Decisao, cobre_queixa: bool) -> None:
@@ -270,6 +302,10 @@ def _proximo_passo(ficha: dict, d: Decisao, cobre_queixa: bool) -> None:
 
     # Ficha completa: resumo e confirmação (seção 18).
     if ficha.get("status") != "aguardando_confirmacao" or ficha.get("ultima_pergunta") != "confirmacao":
+        # A confirmação da última resposta vem antes do resumo, não depois.
+        if d.confirmacao:
+            d.partes.append(d.confirmacao)
+            d.confirmacao = ""
         d.partes.append(fp.resumo(ficha))
     ficha["status"] = "aguardando_confirmacao"
     ficha["ultima_pergunta"] = "confirmacao"
@@ -290,8 +326,10 @@ def montar(d: Decisao, texto_modelo: str = "") -> tuple[str, list[str]]:
         if limpo:
             limpo, violacoes = clinica.conferir_resposta(limpo)
         partes.append(limpo or clinica.RESPOSTA_DUVIDA_GENERICA)
-    if d.pergunta_final:
-        partes.append(d.pergunta_final)
+    if d.confirmacao and d.pergunta_final:
+        partes.append(f"{d.confirmacao} {d.pergunta_final}")
+    elif d.confirmacao or d.pergunta_final:
+        partes.append(d.confirmacao or d.pergunta_final)
     vistos, unicas = set(), []
     for p in partes:
         p = (p or "").strip()

@@ -1610,6 +1610,9 @@ def get_crm_contact_detail(contact_id: int) -> dict | None:
         "WHERE fu.contact_id=? ORDER BY fu.created_at DESC",
         (contact_id,),
     )
+    item["tasks"] = db.fetch_all(
+        "SELECT * FROM tasks WHERE contact_id=? ORDER BY created_at DESC", (contact_id,)
+    )
     item["logs"] = db.fetch_all(
         "SELECT l.*, a.name as automation_name "
         "FROM crm_logs l LEFT JOIN crm_automations a ON l.automation_id=a.id "
@@ -1634,6 +1637,7 @@ def get_crm_dashboard_stats() -> dict:
     total = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts")["cnt"]
     novo = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='novo'")["cnt"]
     em_atendimento = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='em_atendimento'")["cnt"]
+    agendamento = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='agendamento'")["cnt"]
     cliente = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='cliente'")["cnt"]
     inativo = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='inativo'")["cnt"]
     nao_interessado = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='nao_interessado'")["cnt"]
@@ -1642,6 +1646,7 @@ def get_crm_dashboard_stats() -> dict:
         "total_contacts": total,
         "novo": novo,
         "em_atendimento": em_atendimento,
+        "agendamento": agendamento,
         "cliente": cliente,
         "inativo": inativo,
         "nao_interessado": nao_interessado,

@@ -267,6 +267,29 @@ class Fluxo(unittest.TestCase):
         blocos = saidas[10][2].split("\n\n")
         self.assertTrue(any(b.startswith("Confira os dados") and "• Nome: Maria Silva" in b for b in blocos))
 
+    def test_confirmacao_nao_se_repete(self):
+        """'Certo, anotado.' saia 9 vezes iguais (teste de 02/10)."""
+        _, saidas = conversa(self.CONVERSA)
+        textos = [t for _, _, t in saidas]
+        self.assertFalse(any("Certo, anotado." in t for t in textos))
+        confirmacoes = [d.confirmacao for _, d, _ in saidas if d.confirmacao]
+        self.assertGreaterEqual(len(confirmacoes), 8)
+        self.assertEqual(len(confirmacoes), len(set(confirmacoes)))
+        # Confirmacao e pergunta na MESMA mensagem (uma bolha so).
+        self.assertIn(f"Prazer, Maria! {fp.PERGUNTAS['queixa']}", textos[1].split("\n\n"))
+
+    def test_cumprimento_no_meio_e_respondido(self):
+        for cumprimento in ["Boa noite", "Olá, boa noite", "oi, tudo bem?"]:
+            with self.subTest(cumprimento=cumprimento):
+                ficha, saidas = conversa(["Oi", cumprimento])
+                self.assertTrue(saidas[1][2].startswith("Boa tarde! Com quem eu falo?"))
+
+    def test_confirmacao_vem_antes_do_resumo(self):
+        _, saidas = conversa(self.CONVERSA)
+        blocos = saidas[10][2].split("\n\n")
+        self.assertEqual(blocos[0], "Obrigada pelas informações.")
+        self.assertTrue(blocos[1].startswith("Confira os dados"))
+
     def test_nenhuma_pergunta_se_repete(self):
         _, saidas = conversa(self.CONVERSA)
         perguntas = [d.pergunta_final for _, d, _ in saidas if d.pergunta_final
