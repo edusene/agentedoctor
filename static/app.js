@@ -3187,6 +3187,11 @@ document.addEventListener('keydown', e => {
 
 let crmCurrentView = 'dashboard';
 let crmContactProfileId = null;
+// Cada troca de tela do CRM ganha um numero. Resposta que chega depois de o
+// usuario ja ter ido para outra tela (ou outro contato) e descartada: era
+// isso que fazia o contato antigo aparecer e depois trocar pelo novo.
+let crmNavToken = 0;
+let crmProfileReq = 0;
 
 /* ── CRM Status Labels ─────────────────────────────────────────────────────── */
 const CRM_STATUS = {
@@ -3205,8 +3210,9 @@ function switchCrmView(view) {
     document.querySelector(`.crm-nav-item[data-crm-view="${view}"]`).classList.add('active');
     document.querySelectorAll('.crm-subview').forEach(v => v.classList.remove('active'));
     document.getElementById(`crm-view-${view}`).classList.add('active');
-    closeCrmContactProfile();
+    closeCrmContactProfile(false);
     crmCurrentView = view;
+    crmNavToken++;
     loadCrmView(view);
 }
 
@@ -3221,12 +3227,27 @@ function loadCrmView(view) {
 }
 
 /* ── CRM Dashboard ─────────────────────────────────────────────────────────── */
+let crmDashboardCache = null;
+
 async function loadCrmDashboard() {
+    const tk = crmNavToken;
     const grid = document.getElementById('crm-stats-grid');
-    grid.innerHTML = skeletonCards(6);
+    // Ultimo resultado na tela na hora; os numeros novos chegam por cima.
+    if (crmDashboardCache) renderCrmDashboard(crmDashboardCache);
+    else grid.innerHTML = skeletonCards(7);
     let stats;
     try { stats = await api('/api/crm/dashboard'); } catch(e) { stats = null; }
-    if (!stats || stats.error) { grid.innerHTML = '<p class="muted">Erro ao carregar</p>'; return; }
+    if (tk !== crmNavToken) return;
+    if (!stats || stats.error) {
+        if (!crmDashboardCache) grid.innerHTML = '<p class="muted">Erro ao carregar</p>';
+        return;
+    }
+    crmDashboardCache = stats;
+    renderCrmDashboard(stats);
+}
+
+function renderCrmDashboard(stats) {
+    const grid = document.getElementById('crm-stats-grid');
     const fu = stats.follow_ups || {};
     grid.innerHTML = `
         <div class="stat-card">
@@ -3269,13 +3290,14 @@ async function loadCrmDashboard() {
 
 /* ── CRM Contacts ──────────────────────────────────────────────────────────── */
 let crmContactsList = [];
+let crmContactsUrl = '';
+let crmContactsReq = 0;
 
 async function loadCrmContacts() {
     const list = document.getElementById('crm-contacts-list');
     const profile = document.getElementById('crm-contact-profile');
     if (profile) profile.style.display = 'none';
     list.style.display = 'block';
-    list.innerHTML = skeletonRows(5);
 
     const search = document.getElementById('crm-contact-search')?.value || '';
     const status = document.getElementById('crm-contact-status-filter')?.value || '';
@@ -3288,7 +3310,24 @@ async function loadCrmContacts() {
     if (days) url += `&days_without=${days}`;
     if (followUp) url += `&has_follow_up=${followUp}`;
 
-    crmContactsList = await api(url);
+    const tk = crmNavToken;
+    const req = ++crmContactsReq;
+    // Mesmo filtro da ultima vez: mostra a lista que ja temos e atualiza por
+    // tras, em vez de esvaziar a tela a cada volta para a aba.
+    if (url === crmContactsUrl && crmContactsList.length) renderCrmContacts();
+    else list.innerHTML = skeletonRows(5);
+
+    const res = await api(url);
+    // Usuario mudou de tela, ou digitou de novo na busca: resposta velha.
+    if (tk !== crmNavToken || req !== crmContactsReq) return;
+    crmContactsList = res || [];
+    crmContactsUrl = url;
+    renderCrmContacts();
+}
+
+function renderCrmContacts() {
+    const list = document.getElementById('crm-contacts-list');
+    if (crmContactProfileId) return;  // perfil aberto: a lista fica escondida
     if (!crmContactsList || crmContactsList.length === 0) {
         list.innerHTML = '<div class="empty-state">Nenhum contato encontrado</div>';
         return;
@@ -3324,14 +3363,31 @@ async function loadCrmContacts() {
 }
 
 async function openCrmContactProfile(contactId) {
+    const req = ++crmProfileReq;
     crmContactProfileId = contactId;
     const list = document.getElementById('crm-contacts-list');
     const profile = document.getElementById('crm-contact-profile');
     list.style.display = 'none';
     profile.style.display = 'block';
 
+    // Troca de contato na hora: nada do contato anterior fica na tela.
+    const daLista = (crmContactsList || []).find(c => c.id === contactId);
+    document.getElementById('crm-profile-name').textContent =
+        (daLista && (daLista.name || daLista.phone)) || 'Carregando...';
+    document.getElementById('crm-profile-info').innerHTML =
+        `<div class="crm-profile-card">${skeletonRows(4)}</div>`;
+    document.getElementById('crm-profile-messages').innerHTML =
+        `<h3>Historico de Mensagens</h3><div class="crm-messages-list">${skeletonRows(4)}</div>`;
+
+    // Uma chamada so: o servidor ja manda tags, tarefas e mensagens juntos.
     const data = await api(`/api/crm/contacts/${contactId}`);
-    if (!data) { toast('Erro ao carregar contato', 'error'); return; }
+    if (req !== crmProfileReq) return;  // usuario ja abriu outro contato
+    if (!data || data.error) {
+        document.getElementById('crm-profile-info').innerHTML =
+            '<div class="crm-profile-card"><p class="muted">Erro ao carregar contato</p></div>';
+        document.getElementById('crm-profile-messages').innerHTML = '';
+        return;
+    }
 
     document.getElementById('crm-profile-name').textContent = data.name || data.phone || 'Contato';
 
@@ -3345,9 +3401,7 @@ async function openCrmContactProfile(contactId) {
         ? new Date(data.created_at + 'Z').toLocaleString('pt-BR')
         : '-';
     const daysW = data.days_without_interaction != null ? data.days_without_interaction : '-';
-
-    const allTags = await api('/api/tags');
-    const tagOptions = (allTags || []).filter(t => !(data.tags || []).some(tg => tg.id === t.id));
+    const tagOptions = (data.all_tags || []).filter(t => !(data.tags || []).some(tg => tg.id === t.id));
 
     document.getElementById('crm-profile-info').innerHTML = `
         <div class="crm-profile-card">
@@ -3415,25 +3469,15 @@ async function openCrmContactProfile(contactId) {
         </div>` : ''}
     `;
 
-    // Carregar historico de mensagens
-    const conv = await api(`/api/conversations?limit=50`);
-    if (conv && conv.length > 0) {
-        const contactConv = conv.find(c => c.contact_id === data.id);
-        if (contactConv) {
-            const msgData = await api(`/api/conversations/${contactConv.id}`);
-            if (msgData && msgData.messages) {
-                const msgDiv = document.getElementById('crm-profile-messages');
-                msgDiv.innerHTML = `<h3>Historico de Mensagens</h3><div class="crm-messages-list">${
-                    msgData.messages.map(m => {
-                        const time = m.created_at ? new Date(m.created_at + 'Z').toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
-                        const dir = m.direction === 'in' ? 'Recebido' : m.direction === 'out' ? 'Enviado' : 'Sistema';
-                        const dirClass = m.direction === 'in' ? 'crm-msg-in' : m.direction === 'out' ? 'crm-msg-out' : 'crm-msg-internal';
-                        return `<div class="crm-msg ${dirClass}"><div class="crm-msg-body">${esc(m.body)}</div><div class="crm-msg-meta">${dir} · ${time}</div></div>`;
-                    }).join('')
-                }</div>`;
-            }
-        }
-    }
+    const msgs = data.messages || [];
+    document.getElementById('crm-profile-messages').innerHTML = `<h3>Historico de Mensagens</h3><div class="crm-messages-list">${
+        msgs.length ? msgs.map(m => {
+            const time = m.created_at ? new Date(m.created_at + 'Z').toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+            const dir = m.direction === 'in' ? 'Recebido' : m.direction === 'out' ? 'Enviado' : 'Sistema';
+            const dirClass = m.direction === 'in' ? 'crm-msg-in' : m.direction === 'out' ? 'crm-msg-out' : 'crm-msg-internal';
+            return `<div class="crm-msg ${dirClass}"><div class="crm-msg-body">${esc(m.body)}</div><div class="crm-msg-meta">${dir} · ${time}</div></div>`;
+        }).join('') : '<p class="muted">Nenhuma mensagem</p>'
+    }</div>`;
 }
 
 async function concluirCrmTask(taskId, contactId) {
@@ -3446,13 +3490,16 @@ async function concluirCrmTask(taskId, contactId) {
     }
 }
 
-function closeCrmContactProfile() {
+function closeCrmContactProfile(recarregar = true) {
     crmContactProfileId = null;
+    crmProfileReq++;
     const list = document.getElementById('crm-contacts-list');
     const profile = document.getElementById('crm-contact-profile');
     if (profile) profile.style.display = 'none';
     if (list) list.style.display = 'block';
-    loadCrmContacts();
+    // Na troca de aba quem carrega e o loadCrmView: recarregar aqui buscava a
+    // lista de contatos ate para abrir a Visao Geral (e duas vezes em Contatos).
+    if (recarregar) loadCrmContacts();
 }
 
 async function updateCrmContactStatus(contactId, status) {
@@ -3486,7 +3533,10 @@ let crmAutomationsList = [];
 async function loadCrmAutomations() {
     const list = document.getElementById('crm-automations-list');
     list.innerHTML = skeletonRows(3);
-    crmAutomationsList = await api('/api/crm/automations');
+    const tk = crmNavToken;
+    const automacoes = await api('/api/crm/automations');
+    if (tk !== crmNavToken) return;
+    crmAutomationsList = automacoes;
     if (!crmAutomationsList || crmAutomationsList.length === 0) {
         list.innerHTML = '<div class="empty-state">Nenhuma automacao criada</div>';
         return;
@@ -3660,7 +3710,9 @@ async function loadCrmFollowUps() {
     const status = document.getElementById('crm-followup-status-filter')?.value || '';
     let url = '/api/crm/follow-ups?limit=200';
     if (status) url += `&status=${status}`;
+    const tk = crmNavToken;
     const followUps = await api(url);
+    if (tk !== crmNavToken) return;
     if (!followUps || followUps.length === 0) {
         list.innerHTML = '<div class="empty-state">Nenhum follow-up encontrado</div>';
         return;
@@ -3691,7 +3743,9 @@ async function loadCrmFollowUps() {
 async function loadCrmLogs() {
     const list = document.getElementById('crm-logs-list');
     list.innerHTML = skeletonRows(4);
+    const tk = crmNavToken;
     const logs = await api('/api/crm/logs?limit=200');
+    if (tk !== crmNavToken) return;
     if (!logs || logs.length === 0) {
         list.innerHTML = '<div class="empty-state">Nenhum log registrado</div>';
         return;

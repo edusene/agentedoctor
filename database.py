@@ -1487,22 +1487,19 @@ def cancel_follow_ups_for_contact(contact_id: int) -> int:
 
 
 def get_follow_ups_stats() -> dict:
-    pending = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='pendente'")["cnt"]
-    sent = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='enviado'")["cnt"]
+    """Contagem dos follow-ups em UMA consulta (eram 5, uma ida ao banco cada)."""
     today = datetime.utcnow().strftime("%Y-%m-%d")
-    sent_today = db.fetch_one(
-        "SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='enviado' AND sent_at >= ?",
+    row = db.fetch_one(
+        "SELECT "
+        "COALESCE(SUM(CASE WHEN status='pendente' THEN 1 ELSE 0 END), 0) AS pending, "
+        "COALESCE(SUM(CASE WHEN status='enviado' THEN 1 ELSE 0 END), 0) AS sent, "
+        "COALESCE(SUM(CASE WHEN status='enviado' AND sent_at >= ? THEN 1 ELSE 0 END), 0) AS sent_today, "
+        "COALESCE(SUM(CASE WHEN status='cancelado' THEN 1 ELSE 0 END), 0) AS cancelled, "
+        "COALESCE(SUM(CASE WHEN status='erro' THEN 1 ELSE 0 END), 0) AS errors "
+        "FROM crm_follow_ups",
         (today,),
-    )["cnt"]
-    cancelled = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='cancelado'")["cnt"]
-    errors = db.fetch_one("SELECT COUNT(*) as cnt FROM crm_follow_ups WHERE status='erro'")["cnt"]
-    return {
-        "pending": pending,
-        "sent": sent,
-        "sent_today": sent_today,
-        "cancelled": cancelled,
-        "errors": errors,
-    }
+    ) or {}
+    return {k: int(row.get(k) or 0) for k in ("pending", "sent", "sent_today", "cancelled", "errors")}
 
 
 # ── CRM: Logs ───────────────────────────────────────────────────────────────
@@ -1597,13 +1594,53 @@ def list_contacts_crm(status: str = "", tag_id: int = 0, days_without: int = 0,
     return result
 
 
-def get_crm_contact_detail(contact_id: int) -> dict | None:
-    """Retorna detalhe completo do contato CRM."""
+# Campos de mensagem que o perfil do CRM mostra. Sem media_url: ela guarda a
+# midia inteira em base64 e pesava megabytes numa tela que so mostra texto.
+_CAMPOS_MSG_CRM = "id, direction, body, msg_type, created_at"
+_LIMITE_MSGS_CRM = 100
+
+
+def _detalhe_crm_postgres(contact_id: int) -> dict | None:
+    """Perfil do contato inteiro em UMA consulta (json montado no banco)."""
+    row = db.fetch_one(
+        "SELECT row_to_json(ct) AS contato, "
+        " (SELECT COALESCE(json_agg(t ORDER BY t.name), '[]'::json) FROM "
+        "   (SELECT tg.* FROM tags tg JOIN contact_tags x ON x.tag_id = tg.id "
+        "    WHERE x.contact_id = ct.id) t) AS tags, "
+        " (SELECT COALESCE(json_agg(t ORDER BY t.name), '[]'::json) FROM tags t) AS all_tags, "
+        " (SELECT COALESCE(json_agg(f ORDER BY f.created_at DESC), '[]'::json) FROM "
+        "   (SELECT fu.*, a.name AS automation_name FROM crm_follow_ups fu "
+        "    JOIN crm_automations a ON fu.automation_id = a.id WHERE fu.contact_id = ct.id) f) AS follow_ups, "
+        " (SELECT COALESCE(json_agg(l ORDER BY l.created_at DESC), '[]'::json) FROM "
+        "   (SELECT lg.*, a.name AS automation_name FROM crm_logs lg "
+        "    LEFT JOIN crm_automations a ON lg.automation_id = a.id WHERE lg.contact_id = ct.id "
+        "    ORDER BY lg.created_at DESC LIMIT 50) l) AS logs, "
+        " (SELECT COALESCE(json_agg(tk ORDER BY tk.created_at DESC), '[]'::json) FROM "
+        "   (SELECT * FROM tasks WHERE contact_id = ct.id) tk) AS tasks, "
+        " (SELECT id FROM conversations WHERE contact_id = ct.id ORDER BY id DESC LIMIT 1) AS conversation_id, "
+        " (SELECT COALESCE(json_agg(m ORDER BY m.created_at, m.id), '[]'::json) FROM "
+        f"   (SELECT {_CAMPOS_MSG_CRM} FROM messages WHERE conversation_id = "
+        "     (SELECT id FROM conversations WHERE contact_id = ct.id ORDER BY id DESC LIMIT 1) "
+        f"    ORDER BY created_at DESC, id DESC LIMIT {_LIMITE_MSGS_CRM}) m) AS messages "
+        "FROM contacts ct WHERE ct.id = ?",
+        (contact_id,),
+    )
+    if not row or not row.get("contato"):
+        return None
+    item = dict(row["contato"])
+    for campo in ("tags", "all_tags", "follow_ups", "logs", "tasks", "messages"):
+        item[campo] = row.get(campo) or []
+    item["conversation_id"] = row.get("conversation_id")
+    return item
+
+
+def _detalhe_crm_sqlite(contact_id: int) -> dict | None:
     contact = get_contact_by_id(contact_id)
     if not contact:
         return None
     item = dict(contact)
     item["tags"] = get_contact_tags(contact_id)
+    item["all_tags"] = list_tags()
     item["follow_ups"] = db.fetch_all(
         "SELECT fu.*, a.name as automation_name "
         "FROM crm_follow_ups fu JOIN crm_automations a ON fu.automation_id=a.id "
@@ -1619,6 +1656,30 @@ def get_crm_contact_detail(contact_id: int) -> dict | None:
         "WHERE l.contact_id=? ORDER BY l.created_at DESC LIMIT 50",
         (contact_id,),
     )
+    conv = db.fetch_one(
+        "SELECT id FROM conversations WHERE contact_id=? ORDER BY id DESC LIMIT 1", (contact_id,)
+    )
+    item["conversation_id"] = conv["id"] if conv else None
+    msgs = db.fetch_all(
+        f"SELECT {_CAMPOS_MSG_CRM} FROM messages WHERE conversation_id=? "
+        f"ORDER BY created_at DESC, id DESC LIMIT {_LIMITE_MSGS_CRM}",
+        (item["conversation_id"],),
+    ) if conv else []
+    item["messages"] = list(reversed(msgs))
+    return item
+
+
+def get_crm_contact_detail(contact_id: int) -> dict | None:
+    """Detalhe completo do contato CRM, com tags, tarefas e mensagens.
+
+    O painel fazia 4 pedidos em sequência para montar esta tela (detalhe,
+    todas as tags, as 50 últimas conversas para achar a deste contato e a
+    conversa inteira, com as mídias em base64). Agora vem tudo aqui.
+    """
+    item = (_detalhe_crm_postgres(contact_id) if db.DB_DRIVER == "postgresql"
+            else _detalhe_crm_sqlite(contact_id))
+    if not item:
+        return None
     lia = item.get("last_interaction_at")
     now = datetime.utcnow()
     if lia:
@@ -1633,25 +1694,20 @@ def get_crm_contact_detail(contact_id: int) -> dict | None:
 
 
 def get_crm_dashboard_stats() -> dict:
-    """Estatísticas do dashboard CRM."""
-    total = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts")["cnt"]
-    novo = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='novo'")["cnt"]
-    em_atendimento = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='em_atendimento'")["cnt"]
-    agendamento = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='agendamento'")["cnt"]
-    cliente = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='cliente'")["cnt"]
-    inativo = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='inativo'")["cnt"]
-    nao_interessado = db.fetch_one("SELECT COUNT(*) as cnt FROM contacts WHERE crm_status='nao_interessado'")["cnt"]
-    follow_ups = get_follow_ups_stats()
-    return {
-        "total_contacts": total,
-        "novo": novo,
-        "em_atendimento": em_atendimento,
-        "agendamento": agendamento,
-        "cliente": cliente,
-        "inativo": inativo,
-        "nao_interessado": nao_interessado,
-        "follow_ups": follow_ups,
-    }
+    """Estatísticas do dashboard CRM em UMA consulta (eram 7, mais 5 dos follow-ups).
+
+    Com o banco no Supabase cada consulta é uma ida e volta pela rede: doze
+    seguidas deixavam a aba CRM lenta a cada abertura.
+    """
+    status = ("novo", "em_atendimento", "agendamento", "cliente", "inativo", "nao_interessado")
+    somas = ", ".join(
+        f"COALESCE(SUM(CASE WHEN crm_status='{s}' THEN 1 ELSE 0 END), 0) AS {s}" for s in status
+    )
+    row = db.fetch_one(f"SELECT COUNT(*) AS total_contacts, {somas} FROM contacts") or {}
+    resultado = {"total_contacts": int(row.get("total_contacts") or 0)}
+    resultado.update({s: int(row.get(s) or 0) for s in status})
+    resultado["follow_ups"] = get_follow_ups_stats()
+    return resultado
 
 
 def create_follow_ups_for_contact(contact_id: int) -> int:
