@@ -93,14 +93,13 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     texto = (texto or "").strip()
     t = clinica.normalizar(texto)
 
-    abertura = ""
-    if not ficha.get("saudacao_feita"):
-        abertura = apresentacao(momento, ficha.get("nome", ""))
-        ficha["saudacao_feita"] = True
+    abertura = not ficha.get("saudacao_feita")
+    ficha["saudacao_feita"] = True
 
     def fechar() -> Decisao:
+        # Montada no fim: "Oi, sou a Carla" ja cumprimenta pelo nome.
         if abertura:
-            d.partes.insert(0, abertura)
+            d.partes.insert(0, apresentacao(momento, ficha.get("nome", "")))
         return d
 
     # ── Encaminhado: a equipe já está com o caso ─────────────────────────────
@@ -171,9 +170,38 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
             return fechar()
         # Outra coisa (uma dúvida no meio da confirmação): responde e volta.
 
+    ultima = ficha.get("ultima_pergunta", "")
+
+    # ── 3b. Mensagens que não respondem à pergunta (travadas, sem IA) ─────────
+    # Antes iam para o modelo ("pq?", "?", "tem alguém aí?") ou eram gravadas
+    # como resposta ("kkkk" virava o exame do paciente).
+    if not midia and texto:
+        if _RX_SO_INFORMACAO.search(t.strip(" .!")) and not clinica.respostas_travadas(texto):
+            ficha["ultima_pergunta"] = ""
+            d.tipos.append("so_informacao")
+            d.partes.append("Sem problema! Fique à vontade para perguntar o que quiser sobre os "
+                            "procedimentos. Se quiser agendar uma avaliação, é só me avisar.")
+            return fechar()
+        resposta_curta = _resposta_fora_do_fluxo(ficha, texto, t, ultima)
+        if resposta_curta is not None:
+            d.tipos.append("fora_do_fluxo")
+            if resposta_curta:
+                d.confirmacao = resposta_curta
+            _proximo_passo(ficha, d, False, repetir=True)
+            return fechar()
+        # "e pra minha filha tirar o siso": anota para quem e o atendimento.
+        terceiro = fp.RX_TERCEIRO.search(t)
+        if terceiro and not ficha.get("para_quem"):
+            ficha["para_quem"] = terceiro.group(1)
+            d.tipos.append("para_terceiro")
+            if fp._RX_SO_TERCEIRO.match(t.strip(" .!")):
+                d.confirmacao = (f"Certo, anotei que o atendimento é para {'o seu' if terceiro.group(1)[-1] == 'o' or terceiro.group(1) in ('pai', 'marido', 'irmao', 'avo') else 'a sua'} "
+                                 f"{terceiro.group(1)}.")
+                _proximo_passo(ficha, d, False)
+                return fechar()
+
     # ── 4. Resposta à pergunta que o código fez ───────────────────────────────
     capturou = False
-    ultima = ficha.get("ultima_pergunta", "")
     if ultima == "cta_curiosidade" and not midia:
         ficha["ultima_pergunta"] = ""
         if clinica.e_nao(texto) and "?" not in texto and not clinica.classificar_areas(texto):
@@ -226,7 +254,8 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
 
     # ── 8. Dúvida aberta que nada acima respondeu: vai para o modelo ─────────
     # Cumprimento com "?" ("oi, tudo bem?") nao e duvida: nao vai ao modelo.
-    if texto and not travadas and tem_duvida_aberta(texto) and not e_so_cumprimento(texto):
+    if (texto and not travadas and tem_duvida_aberta(texto) and not e_so_cumprimento(texto)
+            and not (capturou and ("?" not in texto or ultima == "nome"))):
         d.usar_llm = True
         d.tipos.append("llm")
     elif (texto and not travadas and not capturou and not mudou and not midia
@@ -238,6 +267,13 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
 
     if capturou and not d.partes and not d.usar_llm:
         d.confirmacao = _confirmacao(ultima, ficha)
+        # "Ana Paula, tudo bem?": responde ao cumprimento junto com o nome.
+        if ultima == "nome" and re.search(r"tudo (bem|bom|certo)", t):
+            d.confirmacao += " Tudo ótimo por aqui."
+    elif (ultima == "queixa" and not ficha.get("queixa") and not d.partes and not d.usar_llm
+          and ficha.get("intencao") == "pronto_agendar"):
+        # "quero fazer uma avaliacao": reconhece o pedido antes de perguntar a queixa.
+        d.confirmacao = "Claro, vamos agendar a sua avaliação!"
     elif texto and e_so_cumprimento(texto) and not abertura and not d.partes:
         # "Boa noite" no meio do atendimento: responde ao cumprimento antes de
         # repetir a pergunta, em vez de ignora-lo (teste de 02/10).
@@ -261,11 +297,12 @@ def _confirmacao(campo: str, ficha: dict) -> str:
     if campo == "sinais_gravidade":
         return "Obrigada por responder."
     if campo == "exames":
-        return ("Sem problema, isso pode ser visto na avaliação." if valor.startswith("nao")
+        return ("Sem problema, isso pode ser visto na avaliação." if valor.startswith(("nao", "ainda nao"))
                 else "Ótimo, leve no dia da avaliação.")
     if campo == "avaliacao_previa":
-        return ("Tudo bem." if valor.startswith("nao")
-                else "Ótimo, isso ajuda o Dr. Fabrício a entender o seu caso.")
+        profissional = re.search(r"\b(dentista|ortodontista|medic|doutor|doutora|dr|dra|implantodontista|cirurgiao)", valor)
+        return ("Ótimo, isso ajuda o Dr. Fabrício a entender o seu caso." if valor == "sim" or profissional
+                else "Tudo bem.")
     return {
         "queixa": "Entendi.",
         "detalhe_area": "Obrigada pelos detalhes.",
@@ -277,7 +314,52 @@ def _confirmacao(campo: str, ficha: dict) -> str:
     }.get(campo, "")
 
 
-def _proximo_passo(ficha: dict, d: Decisao, cobre_queixa: bool) -> None:
+_RX_PRESENCA = re.compile(r"^(?:oi |ola )?(?:tem alguem (?:ai|aqui|ae)|alguem (?:ai|aqui|ae)|ta ai|esta ai|tem gente|alo)$")
+_RX_POR_QUE = re.compile(r"^(?:mas )?(?:pq|pra que|para que|por que|porque|por qual motivo|pra q|pq isso|pra que isso|por que isso)$")
+_RX_AGRADECIMENTO = re.compile(r"^(?:muito )?(?:obrigad[oa]|obg|valeu|vlw|agradeco)\b")
+_RX_SO_INFORMACAO = re.compile(
+    r"^(?:nada|nenhum[a]?|nao)?[ ,]*(?:so|apenas|somente) (?:queria|quero|estava|tava|to|estou) "
+    r"(?:saber|vendo|olhando|perguntando|conhecendo|tirar uma duvida|uma informacao)\b"
+    r"|^(?:so|apenas) (?:uma )?(?:duvida|informacao|olhando|vendo)$")
+_RX_PRECISA_EXAME = re.compile(r"\b(?:preciso|precisa|tenho que|tem que|e necessario|obrigatorio|e preciso)\b")
+_RX_FIM_DE_SEMANA = re.compile(r"\b(?:sabado|sabados|domingo|domingos|fim de semana|final de semana)\b")
+_RX_DIA_UTIL = re.compile(r"\b(?:segunda|terca|quarta|quinta|sexta|qualquer|semana|dia util|dias uteis)\b")
+
+
+def _resposta_fora_do_fluxo(ficha: dict, texto: str, t: str, ultima: str) -> str | None:
+    """Mensagem que não responde à pergunta pendente.
+
+    Devolve a frase que vai antes da pergunta repetida ("" = só repete), ou
+    None quando a mensagem é uma resposta normal e segue o fluxo.
+    """
+    limpo = " ".join(re.sub(r"[^\w\s]", " ", t).split())
+    if not limpo:
+        return "Desculpe, não entendi bem."
+    if _RX_PRESENCA.match(limpo):
+        return "Estou aqui, sim!"
+    if _RX_POR_QUE.match(limpo) and ultima in fp.ORDEM:
+        return ("Pergunto para registrar o seu atendimento e passar as informações "
+                "certas para o Dr. Fabrício.")
+    if ultima in fp.ORDEM and not ficha.get(ultima):
+        if _RX_AGRADECIMENTO.match(limpo) and len(limpo.split()) <= 4:
+            return "Por nada!"
+        if fp.sem_conteudo(texto) and not e_so_cumprimento(texto):
+            return ""
+        if ultima == "exames" and "?" in texto and _RX_PRECISA_EXAME.search(limpo) and not clinica.classificar_areas(texto):
+            return "Se algum exame for necessário, o Dr. Fabrício orienta na avaliação."
+        if ultima == "disponibilidade" and _RX_FIM_DE_SEMANA.search(limpo) and not _RX_DIA_UTIL.search(limpo):
+            horario = clinica.info_clinica("horario")
+            h = clinica.normalizar(horario)
+            if horario and "fechad" in h and ("sab" in h or "dom" in h):
+                return f"{clinica.resposta_horario()} Algum dia de segunda a sexta funciona para você?"
+    return None
+
+
+def _proximo_passo(ficha: dict, d: Decisao, cobre_queixa: bool, repetir: bool = False) -> None:
+    # "So queria saber": responde sem empurrar coleta (secao 13).
+    if repetir and d.confirmacao.endswith("funciona para você?"):
+        ficha["ultima_pergunta"] = "disponibilidade"
+        return
     # A resposta da secao 17 ja pede que o paciente conte a queixa: nenhuma
     # outra pergunta na mesma mensagem, e a resposta dele vira a queixa.
     if cobre_queixa and not ficha.get("queixa"):

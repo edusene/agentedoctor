@@ -374,5 +374,99 @@ class Fluxo(unittest.TestCase):
         self.assertTrue(d.usar_llm)
 
 
+class RespostasForaDoEsperado(unittest.TestCase):
+    """Respostas que nao seguem o roteiro (bateria de 03/10). Nenhuma vai para a IA."""
+
+    BASE = ["Oi", "Pedro", "Preciso extrair um dente", "siso de baixo"]
+    ATE = {
+        "nome": ["Oi"],
+        "queixa": ["Oi", "Pedro"],
+        "exames": BASE,
+        "avaliacao_previa": BASE + ["não tenho"],
+        "tempo_queixa": BASE + ["não tenho", "sim"],
+        "cidade": BASE + ["não tenho", "sim", "2 meses"],
+        "disponibilidade": BASE + ["não tenho", "sim", "2 meses", "Porto Velho"],
+        "tipo_consulta": BASE + ["não tenho", "sim", "2 meses", "Porto Velho", "manhã"],
+        "saude": BASE + ["não tenho", "sim", "2 meses", "Porto Velho", "manhã", "primeira"],
+    }
+
+    def responder(self, campo, resposta):
+        ficha, saidas = conversa(self.ATE[campo] + [resposta])
+        d, texto = saidas[-1][1], saidas[-1][2]
+        self.assertFalse(d.usar_llm, f"{resposta!r} foi para a IA")
+        return ficha, texto
+
+    def test_nomes(self):
+        casos = {"Pedro 😊": "Pedro", "pode me chamar de Bia": "Bia", "Dr. Carlos": "Carlos",
+                 "joao pedro da silva santos": "Joao Pedro da Silva Santos",
+                 "Ana Paula, tudo bem?": "Ana Paula", "é a Maria aqui": "Maria", "sou eu": ""}
+        for resposta, nome in casos.items():
+            with self.subTest(resposta=resposta):
+                self.assertEqual(self.responder("nome", resposta)[0]["nome"], nome)
+
+    def test_sem_conteudo_nao_vira_resposta(self):
+        for resposta in ["kkkk", "obrigado", "?", "tem alguém aí?", "bom dia", "pq?"]:
+            with self.subTest(resposta=resposta):
+                ficha, texto = self.responder("exames", resposta)
+                self.assertEqual(ficha["exames"], "")
+                self.assertIn(clinica.AREAS["exodontia"]["pergunta_exames"], texto)
+
+    def test_negativas_e_nao_sei(self):
+        self.assertEqual(self.responder("exames", "acho que não")[0]["exames"], "Não possui")
+        self.assertEqual(self.responder("exames", "não sei")[0]["exames"], "Não sabe informar")
+        self.assertTrue(self.responder("exames", "vou fazer semana que vem")[0]["exames"].startswith("Ainda não"))
+        self.assertEqual(self.responder("tipo_consulta", "não sei")[0]["tipo_consulta"], "Não sabe informar")
+        self.assertEqual(self.responder("tipo_consulta", "já fui aí uma vez")[0]["tipo_consulta"], "Retorno")
+
+    def test_confirmacao_combina_com_a_resposta(self):
+        self.assertIn("Sem problema", self.responder("exames", "acho que não")[1])
+        self.assertIn("Tudo bem.", self.responder("avaliacao_previa", "por conta própria")[1])
+        self.assertIn("Ótimo, isso ajuda", self.responder("avaliacao_previa", "foi o ortodontista")[1])
+
+    def test_remedio_citado_na_saude_nao_e_pedido(self):
+        ficha, texto = self.responder("saude", "sou alérgica a dipirona")
+        self.assertNotIn(clinica.RESPOSTA_MEDICAMENTO, texto)
+        self.assertEqual(ficha["saude"], "sou alérgica a dipirona")
+        self.assertIn("medicamento", [t for t, _ in clinica.respostas_travadas("posso tomar dipirona?")])
+
+    def test_cidade(self):
+        self.assertEqual(self.responder("cidade", "moro aqui mesmo")[0]["cidade"], "Mesma cidade do consultório")
+        self.assertEqual(self.responder("cidade", "porto velho - RO")[0]["cidade"], "Porto Velho - RO")
+        self.assertEqual(self.responder("cidade", "sou de Ji-Paraná")[0]["cidade"], "Ji-Paraná")
+
+    def test_queixa_que_nao_e_queixa(self):
+        ficha, texto = self.responder("queixa", "é pra minha filha")
+        self.assertEqual((ficha["queixa"], ficha["para_quem"]), ("", "filha"))
+        self.assertIn("para a sua filha", texto)
+        ficha, texto = self.responder("queixa", "quero fazer uma avaliação")
+        self.assertEqual(ficha["queixa"], "")
+        self.assertTrue(texto.startswith("Claro, vamos agendar a sua avaliação!"))
+        ficha, texto = self.responder("queixa", "nada, só queria saber")
+        self.assertEqual(ficha["ultima_pergunta"], "")
+
+    def test_grafia_errada_do_siso(self):
+        for resposta in ["PRESISO TIRAR O SIZO", "qro tirar o ciso"]:
+            with self.subTest(resposta=resposta):
+                self.assertEqual(self.responder("queixa", resposta)[0]["area"], "exodontia")
+
+    def test_confirmacao_do_resumo(self):
+        for resposta in ["👍", "certinho", "isso", "ok", "aham"]:
+            with self.subTest(resposta=resposta):
+                ficha, saidas = conversa(self.ATE["saude"] + ["não", resposta])
+                self.assertTrue(saidas[-1][1].encaminhar)
+
+    def test_fim_de_semana_com_consultorio_fechado(self):
+        import os
+        os.environ["CLINICA_HORARIO"] = "SEG - SEX (08:00 - 18:00) SAB E DOM. FECHADO"
+        try:
+            ficha, texto = self.responder("disponibilidade", "só sábado")
+            self.assertEqual(ficha["disponibilidade"], "")
+            self.assertIn("segunda a sexta", texto)
+            self.assertEqual(self.responder("disponibilidade", "sábado ou quarta")[0]["disponibilidade"],
+                             "sábado ou quarta")
+        finally:
+            del os.environ["CLINICA_HORARIO"]
+
+
 if __name__ == "__main__":
     unittest.main()

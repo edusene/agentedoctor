@@ -281,8 +281,10 @@ AREAS: dict[str, dict] = {
         "secao": 2,
         "acao": "Qualificar + agendar",
         "gatilhos": _rx(
-            r"\bsiso", r"dente do juizo", r"terceiro molar", r"extra(ir|cao|coes)", r"exodontia",
-            r"(tirar|arrancar|remover) (o |um |uns |os |meu |meus |dois |2 )?(dente|dentes|siso)",
+            # Grafias erradas comuns no WhatsApp: sizo, ciso, cizo.
+            r"\b(siso|sisos|sizo|sizos|ciso|cisos|cizo)\b", r"dente do juizo", r"terceiro molar",
+            r"extra(ir|cao|coes)", r"exodontia",
+            r"(tirar|tira|arrancar|remover) (o |um |uns |os |meu |meus |dois |2 )?(dente|dentes|siso|sizo|ciso)",
             r"dente (esta |ta )?incluso", r"\bincluso", r"dente (quebrou|quebrado|rachou|partiu)",
         ),
         "acolhimento": (
@@ -430,14 +432,25 @@ def e_emergencia(texto: str, contexto_trauma: bool = False) -> bool:
 _SIM = _rx(
     r"^(sim|s|ss|isso|isso mesmo|pode|pode sim|pode ser|claro|com certeza|ok|okay|certo|"
     r"correto|confirmo|confirmado|esta certo|ta certo|tudo certo|exato|exatamente|perfeito|"
-    r"yes|aham|uhum|beleza|blz|positivo|pode encaminhar|encaminha|manda)\b",
+    r"yes|aham|uhum|beleza|blz|positivo|pode encaminhar|encaminha|manda|certinho|"
+    r"ta certinho|tudo ok|isso ai|confere|pode confirmar|confirma|bora|fechado|sim sim)\b",
 )
+_EMOJI_SIM = {"👍", "👍🏻", "👍🏼", "👍🏽", "👍🏾", "👍🏿", "✅", "👌", "🆗", "✔️", "✔"}
 _NAO = _rx(r"^(nao|n|nop|negativo|nenhum|nenhuma|nada|nunca)\b", r"^(ainda )?nao\b")
 
 
 def e_sim(texto: str) -> bool:
+    if (texto or "").strip() in _EMOJI_SIM:
+        return True
     t = normalizar(texto).strip(" .!")
     return bool(_SIM.search(t)) and not e_nao(texto)
+
+
+_NAO_SABE = _rx(r"^(eu )?(nao sei|sei la|nao lembro|nao tenho certeza|nao faco ideia|nao sei dizer)\b")
+
+
+def e_nao_sabe(texto: str) -> bool:
+    return bool(_NAO_SABE.search(normalizar(texto).strip(" .!")))
 
 
 def e_nao(texto: str) -> bool:
@@ -453,9 +466,10 @@ _PRONTO_AGENDAR = _rx(
     r"\bagend", r"marcar (uma |a )?(consulta|avaliacao|horario)", r"(tem|tenha|ha) (horario|vaga|agenda)",
     r"quero (uma |marcar )?(consulta|avaliacao)", r"(quando|que dia) (posso|consigo) (ir|passar|ser atendid)",
     r"(consulta|avaliacao) (com|para|pra) o (dr|doutor)",
+    r"(quero|queria|gostaria de|preciso) (fazer|marcar|agendar|ter) (uma |a )?(consulta|avaliacao)",
 )
 _INTENCAO = _rx(
-    r"(quero|preciso|gostaria de|queria|pretendo|vou) (fazer|tirar|operar|extrair|resolver|tratar|arrumar|corrigir|colocar|remover)",
+    r"(quero|qro|kero|preciso|presiso|precizo|gostaria de|queria|pretendo|vou) (fazer|tirar|operar|extrair|resolver|tratar|arrumar|corrigir|colocar|remover)",
     r"tenho interesse em (fazer|tirar|operar)", r"meu dentista (pediu|mandou|encaminhou|indicou)",
     r"(fui|foi) encaminhad",
 )
@@ -497,7 +511,7 @@ _RX_VOCE_FAZ = _rx(
 )
 _RX_NAO_SEI = _rx(
     r"nao sei (qual|o que|que|se) .{0,20}(procedimento|tratamento|cirurgia|fazer|preciso|tenho)",
-    r"nao sei o nome", r"nao sei (explicar|dizer) o que",
+    r"nao sei o nome", r"nao sei (explicar|dizer)",
 )
 _RX_CANCER = _rx(r"cancer", r"maligno", r"malign", r"\bcarcinoma")
 _RX_BIOPSIA = _rx(r"biopsia")
@@ -528,7 +542,7 @@ _RX_INDICACAO_PERGUNTA = _rx(
 INTERROGATIVAS = (
     "como ", "o que ", "qual ", "quais ", "quanto", "quando ", "onde ", "por que", "porque ",
     "pode ", "posso ", "da pra", "da para", "demora", "precisa ", "existe ", "e verdade",
-    "e possivel", "tem como", "sera ", "doi", "vai doer", "todo ", "toda ", "tem que",
+    "e possivel", "tem como", "sera ", "vai doer", "todo ", "toda ", "tem que",
 )
 
 
@@ -538,6 +552,10 @@ _RX_MEDICAMENTO = _rx(
     r"(qual|que) (remedio|medicamento|antibiotico|anti-?inflamatorio|analgesico)",
     r"(posso|devo|preciso) tomar", r"o que (eu )?(tomo|posso tomar|devo tomar)", r"\breceita\b",
     r"prescrev", r"passa (um|algum) (remedio|antibiotico)",
+)
+# Nome de remedio sozinho e informacao ("sou alergica a dipirona", "uso
+# losartana"): so trava quando a mensagem e uma pergunta.
+_RX_NOME_REMEDIO = _rx(
     r"dipirona", r"ibuprofeno", r"nimesulida", r"amoxicilina", r"paracetamol", r"\bantibiotico",
     r"cetoprofeno", r"diclofenaco", r"dexametasona", r"tylenol", r"novalgina",
 )
@@ -636,7 +654,7 @@ def respostas_travadas(texto: str) -> list[tuple[str, str]]:
             if rx.search(t):
                 saida.append((tipo, resposta))
 
-    if _RX_MEDICAMENTO.search(t):
+    if _RX_MEDICAMENTO.search(t) or (_RX_NOME_REMEDIO.search(t) and _e_pergunta(texto, t)):
         saida.append(("medicamento", RESPOSTA_MEDICAMENTO))
     if _RX_EXAME.search(t):
         saida.append(("exame", RESPOSTA_EXAME))

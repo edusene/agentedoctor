@@ -37,6 +37,7 @@ ROTULOS = {
     "cidade": "Cidade",
     "disponibilidade": "Disponibilidade",
     "tipo_consulta": "Consulta",
+    "para_quem": "Atendimento para",
     "saude": "Saúde (condições, alergias, medicamentos)",
 }
 
@@ -81,6 +82,7 @@ def nova(phone: str = "") -> dict:
         "emergencia": False,
         "cta_curiosidade_feito": False,
         "observacoes": "",
+        "para_quem": "",
         "atualizado_em": "",
     }
 
@@ -164,7 +166,7 @@ def marcar_pergunta(ficha: dict, campo: str) -> None:
 
 def resumo(ficha: dict) -> str:
     linhas = ["Confira os dados da sua solicitação:"]
-    for campo in ["nome", "telefone"] + ORDEM[1:]:
+    for campo in ["nome", "telefone", "para_quem"] + ORDEM[1:]:
         valor = (ficha.get(campo) or "").strip()
         if not valor or (campo == "detalhe_area" and not _campo_aplicavel(ficha, campo)):
             continue
@@ -229,14 +231,23 @@ _RX_AVALIACAO_SIM = re.compile(
     r"|\bja (?:passei|fui|consultei) (?:em|no|na|por|ao|a|com) (?:um |uma )?(?:dentista|medico|avaliacao|consulta|ortodontista|cirurgiao)"
 )
 _RX_PRIMEIRA = re.compile(r"\bprimeira (?:consulta|vez)\b|\bnunca (?:fui|me consultei|passei)\b|\bprimeira\b")
-_RX_RETORNO = re.compile(r"\bretorno\b|\bja sou paciente\b|\bja (?:fui|me consultei) com (?:ele|o dr|o doutor)\b|\bvoltar\b")
+_RX_RETORNO = re.compile(
+    r"\bretorno\b|\bja (?:sou|fui) paciente\b|\bja consultei\b|\bvoltar\b"
+    r"|\bja (?:fui|vim|estive|passei|me consultei) (?:ai|aqui|la|no consultorio|com voces|com ele|com o dr|com o doutor)\b")
 
 
 def _titulo(nome: str) -> str:
+    """'joao da silva' -> 'Joao da Silva'; 'ji-parana' -> 'Ji-Parana'; 'RO' fica 'RO'."""
     minusculas = {"de", "da", "do", "dos", "das", "e"}
-    partes = [p for p in nome.split() if p]
-    return " ".join(p.lower() if (i and p.lower() in minusculas) else p.capitalize()
-                    for i, p in enumerate(partes))
+
+    def palavra(i: int, p: str) -> str:
+        if i and p.lower() in minusculas:
+            return p.lower()
+        if len(p) <= 2 and p.isupper():
+            return p  # sigla de estado (RO, SP)
+        return "-".join(s.capitalize() for s in p.split("-"))
+
+    return " ".join(palavra(i, p) for i, p in enumerate(p for p in nome.split() if p))
 
 
 def _limpar_nome(bruto: str) -> str:
@@ -253,20 +264,50 @@ def extrair_nome(texto: str) -> str:
     return _limpar_nome(m.group(1)) if m else ""
 
 
+_RX_CUMPRIMENTO_NO_FIM = re.compile(
+    r"(?i)[\s,!.]*(?:tudo bem|tudo bom|tudo certo|td bem|blz|beleza|bom dia|boa tarde|boa noite|ol[aá]|oi)"
+    r"[\s,!?.]*$")
+_RX_TITULO = re.compile(r"(?i)^(?:dr|dra|sr|sra|srta|doutor|doutora|prof|profa)\.?\s+")
+_RX_CHAMAR_DE = re.compile(rf"(?i)\b(?:pode )?(?:me )?cham(?:ar|a|e)(?: me)? de\s+([{_LETRAS}]+(?:\s+[{_LETRAS}]+){{0,3}})")
+_PARTICULAS = {"de", "da", "do", "dos", "das", "e"}
+
+
+def limpar_resposta_de_nome(texto: str) -> str:
+    """Tira emoji, titulo e cumprimento do fim: "Ana Paula, tudo bem?" -> "Ana Paula"."""
+    bruto = re.sub(rf"[^{_LETRAS}\s'.,!?-]", " ", texto or "")
+    bruto = _RX_CUMPRIMENTO_NO_FIM.sub("", bruto).strip(" .,!")
+    return " ".join(_RX_TITULO.sub("", bruto).split())
+
+
 def nome_de_resposta_direta(texto: str) -> str:
-    """Resposta seca à pergunta do nome ("Maria Souza", "é a Maria")."""
-    bruto = (texto or "").strip().strip(".!,")
+    """Resposta seca à pergunta do nome ("Maria Souza", "é a Maria", "pode me chamar de Bia")."""
+    m = _RX_CHAMAR_DE.search(texto or "")
+    if m:
+        return _limpar_nome(m.group(1))
+    bruto = limpar_resposta_de_nome(texto)
     achado = extrair_nome(bruto)
     if achado:
         return achado
     bruto = re.sub(r"(?i)^(?:[ée]\s+(?:o|a)\s+|[ée]\s+|o\s+|a\s+)", "", bruto)
     t = clinica.normalizar(bruto)
+    palavras = bruto.split()
+    # Ate 4 palavras "de verdade" (Joao Pedro da Silva Santos tem 4 + 'da').
     if (not bruto or t in _NAO_E_NOME or any(ch.isdigit() for ch in bruto)
-            or "?" in bruto or len(bruto.split()) > 4
+            or "?" in bruto or len([p for p in palavras if p.lower() not in _PARTICULAS]) > 4
+            or len(palavras) > 6
             or not re.fullmatch(rf"[{_LETRAS}\s'-]+", bruto)
             or clinica.classificar_areas(bruto)):
         return ""
-    return _limpar_nome(bruto)
+    # Para no primeiro "aqui", "sou", "eu"... ("e a Maria aqui", "sou eu"), mas
+    # nao nas particulas de nome composto ("Joao Pedro da Silva").
+    nome = []
+    for p in palavras[:6]:
+        if clinica.normalizar(p) in (_PARADAS_NOME - _PARTICULAS):
+            break
+        nome.append(p.lower() if p.lower() in _PARTICULAS else _titulo(p))
+    while nome and nome[-1] in _PARTICULAS:
+        nome.pop()
+    return " ".join(nome)
 
 
 def _cidade(texto: str) -> str:
@@ -351,15 +392,42 @@ def extrair_passivo(ficha: dict, texto: str) -> list[str]:
     return mudou
 
 
+# Mensagens que nao respondem nada: risada, agradecimento, "ok", cumprimento,
+# so emoji. Eram gravadas como resposta ("kkkk" virava o exame do paciente).
+_RX_SEM_CONTEUDO = re.compile(
+    r"^(?:k+|(?:ha)+h?|(?:he)+|(?:rs)+|obrigad[oa](?: .*)?|valeu|vlw|ok|okay|beleza|blz|show|top|legal"
+    r"|bom dia|boa tarde|boa noite|oi+|ola|opa|hum+|ah+|eita|tudo bem|tudo bom|perfeito)$")
+
+# "e pra minha filha": o atendimento e de outra pessoa, nao e a queixa.
+RX_TERCEIRO = re.compile(
+    r"\b(?:pra|para) (?:o |a )?(?:minha|meu) (filh[oa]|mae|pai|espos[oa]|marido|mulher|irma|irmao|avo|"
+    r"neto|neta|namorad[oa]|sobrinh[oa]|enteado|enteada|sogr[oa])\b")
+
+_RX_SO_TERCEIRO = re.compile(r"^(?:e |eh )?(?:pra|para) (?:o |a )?(?:minha|meu) \w+$")
+
+
+def sem_conteudo(texto: str) -> bool:
+    t = " ".join(re.sub(r"[^\w\s]", " ", clinica.normalizar(texto)).split())
+    return not t or bool(_RX_SEM_CONTEUDO.match(t))
+
+
 def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
     """Grava a resposta à pergunta que o código fez. False = não aproveitável."""
     bruto = (texto or "").strip()
+    if campo == "nome":
+        # "Ana Paula, tudo bem?": o "?" e do cumprimento, nao do nome.
+        bruto = limpar_resposta_de_nome(bruto) if not _RX_CHAMAR_DE.search(bruto) else bruto
     t = clinica.normalizar(bruto)
     if not bruto or not campo or campo not in ORDEM:
         return False
     # Uma pergunta de volta não é resposta ("vocês atendem em Goiânia?").
-    if "?" in bruto:
+    if "?" in bruto or sem_conteudo(bruto):
         return False
+    # "Nao sei" e resposta valida, mas nao e "nao".
+    nao_sabe = clinica.e_nao_sabe(bruto)
+    if nao_sabe and campo in ("exames", "avaliacao_previa", "tipo_consulta", "saude", "tempo_queixa"):
+        ficha[campo] = "Não sabe informar"
+        return True
 
     if campo == "nome":
         nome = nome_de_resposta_direta(bruto)
@@ -371,15 +439,29 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
     if campo == "queixa":
         if len(t) < 3 or clinica.e_sim(bruto) or clinica.e_nao(bruto):
             return False
+        # So "e pra minha filha": falta a queixa.
+        if _RX_SO_TERCEIRO.match(t.strip(" .!")):
+            return False
+        # So "quero agendar uma avaliacao": e intencao, nao queixa.
+        if (clinica.classificar_intencao(bruto) == "pronto_agendar"
+                and not clinica.classificar_areas(bruto) and len(t.split()) <= 6):
+            return False
         ficha["queixa"] = bruto[:300]
         return True
 
     if campo == "cidade":
-        ficha["cidade"] = _cidade(bruto) or _titulo(re.sub(r"(?i)^(?:em|de|moro em|sou de)\s+", "", bruto))[:80]
+        if re.search(r"\b(?:aqui|daqui|mesma cidade|nessa cidade|aqui mesmo)\b", t):
+            ficha["cidade"] = "Mesma cidade do consultório"
+            return True
+        sem_prefixo = re.sub(r"(?i)^(?:eu )?(?:moro|resido|sou|fico|estou)?\s*(?:em|no|na|de|da|do)?\s+",
+                             "", " " + bruto).strip()
+        ficha["cidade"] = _cidade(bruto) or _titulo(sem_prefixo)[:80]
         return True
 
     if campo == "tipo_consulta":
-        if _RX_RETORNO.search(t):
+        if re.search(r"\bprimeira\b", t) and not re.search(r"\bnao (?:e|eh) (?:a )?primeira\b", t):
+            ficha["tipo_consulta"] = "Primeira consulta"
+        elif _RX_RETORNO.search(t):
             ficha["tipo_consulta"] = "Retorno"
         elif _RX_PRIMEIRA.search(t) or clinica.e_nao(bruto):
             ficha["tipo_consulta"] = "Primeira consulta"
@@ -388,7 +470,10 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         return True
 
     if campo == "exames":
-        if _RX_EXAME_NAO.search(t) or clinica.e_nao(bruto):
+        if re.search(r"\b(?:vou|vai|irei|preciso) fazer\b|\bvou tirar\b|\bainda vou\b", t):
+            ficha["exames"] = f"Ainda não ({bruto[:200]})"
+        elif _RX_EXAME_NAO.search(t) or clinica.e_nao(bruto) or re.search(r"\b(?:nao|nunca)\b", t):
+            # "acho que nao", "ainda nao fiz": negativo em qualquer posicao.
             ficha["exames"] = "Não possui"
         elif clinica.e_sim(bruto) and len(t.split()) <= 2:
             ficha["exames"] = "Sim"
