@@ -15,19 +15,26 @@ from datetime import datetime
 import clinica
 import database
 
-# Ordem da seção 14. "telefone" vem do próprio WhatsApp e nunca é perguntado;
-# "detalhe_area" é a pergunta específica da área provável (seções 2 a 11).
-# Exames e indicacao vem logo depois da queixa: sao os pre-requisitos de cada
-# procedimento ("ja fez a radiografia? veio de indicacao de dentista?"), e a
-# pergunta muda conforme a area (clinica.AREAS[...]["pergunta_exames"/
-# "pergunta_indicacao"]).
+# Fluxo pedido pelo Dr. Fabricio (06/10): nome, queixa, detalhe da area, o
+# pre-requisito de exame da area, CADASTRO (dados pessoais) e agendamento.
+# "Ha quanto tempo", "cidade" e "indicacao" sairam do funil: o tempo o
+# cirurgiao pergunta na consulta e a cidade vem no endereco do cadastro. Se o
+# paciente contar por conta propria, a ficha ainda guarda (CAMPOS_EXTRAS).
+# "telefone" vem do proprio WhatsApp e nunca e perguntado.
+CADASTRO = ["nome_completo", "nascimento", "cpf", "rg", "endereco"]
 ORDEM = [
-    "nome", "queixa", "detalhe_area", "exames", "avaliacao_previa",
-    "tempo_queixa", "cidade", "disponibilidade", "tipo_consulta", "saude",
+    "nome", "queixa", "detalhe_area", "exames", *CADASTRO,
+    "disponibilidade", "tipo_consulta", "saude",
 ]
+CAMPOS_EXTRAS = ["avaliacao_previa", "tempo_queixa", "cidade"]
 
 ROTULOS = {
     "nome": "Nome",
+    "nome_completo": "Nome completo",
+    "nascimento": "Data de nascimento",
+    "cpf": "CPF",
+    "rg": "RG",
+    "endereco": "Endereço",
     "telefone": "Telefone",
     "queixa": "Queixa principal",
     "detalhe_area": "Detalhes",
@@ -46,10 +53,12 @@ PERGUNTAS = {
     # Seção 16, segundo parágrafo.
     "queixa": ("Para eu te orientar melhor, me conta qual é a sua principal queixa "
                "ou o que você gostaria de tratar."),
-    "tempo_queixa": "Há quanto tempo você tem essa queixa?",
-    "avaliacao_previa": "Algum dentista ou médico já avaliou isso ou indicou o atendimento?",
     "exames": "Você tem exames (radiografia, tomografia, laudo) ou algum encaminhamento?",
-    "cidade": "Em qual cidade você mora?",
+    "nome_completo": "Qual é o seu nome completo?",
+    "nascimento": "Qual é a sua data de nascimento?",
+    "cpf": "Qual é o seu CPF?",
+    "rg": "Qual é o seu RG?",
+    "endereco": "Qual é o seu endereço completo (rua, número, bairro e cidade)?",
     "disponibilidade": "Quais dias e horários ficam melhores para você vir à avaliação?",
     "tipo_consulta": "Esta seria a sua primeira consulta com o Dr. Fabrício ou é um retorno?",
     "saude": ("Por último: você tem alguma condição de saúde, alergia ou usa algum "
@@ -70,7 +79,9 @@ NAO_INFORMADO = "Não informado"
 def nova(phone: str = "") -> dict:
     return {
         "telefone": phone,
-        **{c: "" for c in ORDEM},
+        **{c: "" for c in ORDEM + CAMPOS_EXTRAS},
+        "cadastro_pedido": False,
+        "aviso_cadastro": "",
         "area": "",
         "areas": [],
         "intencao": "curiosidade",
@@ -136,8 +147,32 @@ _PERGUNTA_DA_AREA = {
 }
 
 
+_ITENS_CADASTRO = {
+    "nome_completo": "Nome completo",
+    "nascimento": "Data de nascimento",
+    "cpf": "CPF",
+    "rg": "RG",
+    "endereco": "Endereço completo (rua, número, bairro e cidade)",
+}
+
+
+def _pergunta_cadastro(ficha: dict) -> str:
+    """Pede o cadastro de uma vez; depois, so o que ficou faltando."""
+    faltam = [c for c in CADASTRO if not ficha.get(c)]
+    lista = "\n".join(f"• {_ITENS_CADASTRO[c]}" for c in faltam)
+    if not ficha.get("cadastro_pedido"):
+        ficha["cadastro_pedido"] = True
+        return ("Agora vou precisar de alguns dados para fazer o seu cadastro. "
+                f"Pode me enviar:\n{lista}")
+    if len(faltam) == 1:
+        return PERGUNTAS[faltam[0]]
+    return f"Para completar o seu cadastro, ainda preciso de:\n{lista}"
+
+
 def pergunta_do_campo(ficha: dict, campo: str) -> str:
     """Pergunta do campo. Com area identificada, a da area tem preferencia."""
+    if campo in CADASTRO:
+        return _pergunta_cadastro(ficha)
     chave = _PERGUNTA_DA_AREA.get(campo)
     if chave:
         da_area = clinica.AREAS.get(ficha.get("area"), {}).get(chave, "")
@@ -164,10 +199,18 @@ def marcar_pergunta(ficha: dict, campo: str) -> None:
         ficha["tentativas"] = t
 
 
+_ORDEM_RESUMO = ["nome", "telefone", "para_quem", "queixa", "detalhe_area", "exames",
+                 "avaliacao_previa", "tempo_queixa", *CADASTRO, "cidade",
+                 "disponibilidade", "tipo_consulta", "saude"]
+
+
 def resumo(ficha: dict) -> str:
     linhas = ["Confira os dados da sua solicitação:"]
-    for campo in ["nome", "telefone", "para_quem"] + ORDEM[1:]:
-        valor = (ficha.get(campo) or "").strip()
+    for campo in _ORDEM_RESUMO:
+        # Resposta em varias linhas ("Quarta de manha / Quinta a tarde") vira
+        # uma linha so: quebrada, ela desmontava a lista do resumo (06/10).
+        linhas_valor = [" ".join(l.split()) for l in str(ficha.get(campo) or "").splitlines()]
+        valor = " / ".join(l for l in linhas_valor if l)
         if not valor or (campo == "detalhe_area" and not _campo_aplicavel(ficha, campo)):
             continue
         linhas.append(f"• {ROTULOS[campo]}: {valor}")
@@ -178,8 +221,9 @@ def resumo(ficha: dict) -> str:
 
 def render_para_prompt(ficha: dict) -> str:
     """Ficha para o modelo ler. Só leitura: quem pergunta é o código."""
+    # Dados do cadastro (CPF, RG, endereco) nunca vao para o modelo.
     preenchidos = [f"- {ROTULOS[c]}: {ficha[c]}" for c in ["nome"] + ORDEM[1:]
-                   if ficha.get(c) and c in ROTULOS]
+                   if ficha.get(c) and c in ROTULOS and c not in CADASTRO]
     area = clinica.AREAS.get(ficha.get("area"), {}).get("nome", "não identificada")
     return (
         "=== FICHA DO PACIENTE (o que ele JÁ informou; não pergunte de novo) ===\n"
@@ -381,7 +425,7 @@ def extrair_passivo(ficha: dict, texto: str) -> list[str]:
         if novas:
             mudou.append("area")
         if not ficha.get("queixa"):
-            ficha["queixa"] = (texto or "").strip()[:300]
+            ficha["queixa"] = limpar_queixa(texto)[:300]
             mudou.append("queixa")
 
     intencao = clinica.intencao_maior(ficha.get("intencao", "curiosidade"),
@@ -446,7 +490,7 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         if (clinica.classificar_intencao(bruto) == "pronto_agendar"
                 and not clinica.classificar_areas(bruto) and len(t.split()) <= 6):
             return False
-        ficha["queixa"] = bruto[:300]
+        ficha["queixa"] = limpar_queixa(bruto)[:300]
         return True
 
     if campo == "cidade":
@@ -457,6 +501,18 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
                              "", " " + bruto).strip()
         ficha["cidade"] = _cidade(bruto) or _titulo(sem_prefixo)[:80]
         return True
+
+    if campo in CADASTRO:
+        if re.search(r"\b(?:prefiro nao|nao quero (?:informar|passar|dizer)|nao tenho)\b", t):
+            ficha[campo] = NAO_INFORMADO
+            return True
+        achados = extrair_cadastro(bruto, campo_esperado=campo)
+        for c, v in achados.items():
+            if c == "_aviso":
+                ficha["aviso_cadastro"] = v
+            elif not ficha.get(c):
+                ficha[c] = v
+        return any(c != "_aviso" for c in achados)
 
     if campo == "tipo_consulta":
         if re.search(r"\bprimeira\b", t) and not re.search(r"\bnao (?:e|eh) (?:a )?primeira\b", t):
@@ -506,8 +562,13 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
 # certo e reescrito; sem isso a correcao ia para Observacoes e o resumo
 # mostrava os dois valores, o velho e o novo.
 _CAMPOS_CORRIGIVEIS = [
-    ("nome", r"\bnome\b"),
-    ("cidade", r"\bcidade\b|\bmoro\b"),
+    ("nome", r"\bnome\b(?! completo)"),
+    ("nome_completo", r"\bnome completo\b"),
+    ("nascimento", r"\bnascimento\b|\bnasci\b|\bdata de nasc"),
+    ("cpf", r"\bcpf\b"),
+    ("rg", r"\brg\b|\bidentidade\b"),
+    ("endereco", r"\bendereco\b|\bmoro\b|\brua\b|\bavenida\b|\bnumero da casa\b"),
+    ("cidade", r"\bcidade\b"),
     ("disponibilidade", r"\b(horario|horarios|dia|dias|disponibilidade|turno|periodo)\b"),
     ("tempo_queixa", r"\btempo\b"),
     ("exames", r"\bexames?\b|\btomografia\b|\bradiografia\b|\blaudo\b"),
@@ -529,6 +590,15 @@ def aplicar_correcao(ficha: dict, texto: str) -> str:
     if campo == "tipo_consulta":
         ficha[campo] = "Retorno" if "retorno" in t else "Primeira consulta"
         return campo
+    if campo in ("cpf", "nascimento", "rg"):
+        # Mesmo leitor do cadastro: CPF conferido, data padronizada.
+        dados = extrair_cadastro(texto, campo_esperado=campo)
+        if dados.get("_aviso"):
+            ficha["aviso_cadastro"] = dados["_aviso"]
+        if dados.get(campo):
+            ficha[campo] = dados[campo]
+            return campo
+        return ""
     m = _RX_VALOR_CORRIGIDO.search(texto or "")
     if not m:
         return ""
@@ -537,3 +607,158 @@ def aplicar_correcao(ficha: dict, texto: str) -> str:
         return ""
     ficha[campo] = _titulo(valor) if campo in ("nome", "cidade") else valor[:300]
     return campo
+
+
+# ── Queixa ───────────────────────────────────────────────────────────────────
+
+_RX_FRASE_DE_NOME = re.compile(
+    r"(?i)^\s*(?:oi|ola|olá|bom dia|boa tarde|boa noite)?[\s,!.]*"
+    r"(?:meu nome [ée]|me chamo|aqui [ée] (?:o|a)|sou (?:o|a))\s+[^\n.!?,]*[.!,]?\s*$")
+_RX_FRASE_CUMPRIMENTO = re.compile(
+    r"(?i)^\s*(?:oi|ola|olá|opa|bom dia|boa tarde|boa noite|tudo bem|tudo bom)[\s,!?.]*$")
+
+
+def limpar_queixa(texto: str) -> str:
+    """Queixa sem o nome e sem cumprimento junto.
+
+    "Me chamo José / Minha principal queixa é a posição do meu queixo" virava a
+    queixa inteira, com o nome dentro (teste do Dr. Fabricio, 06/10).
+    """
+    partes = [p.strip() for p in re.split(r"[\n]+|(?<=[.!?])\s+", texto or "") if p.strip()]
+    uteis = [p for p in partes if not _RX_FRASE_DE_NOME.match(p) and not _RX_FRASE_CUMPRIMENTO.match(p)]
+    return " ".join(uteis or partes).strip()
+
+
+# ── Cadastro (nome completo, nascimento, CPF, RG, endereco) ──────────────────
+
+_RX_CPF = re.compile(r"(?<!\d)(\d{3})[.\s]?(\d{3})[.\s]?(\d{3})[-.\s]?(\d{2})(?!\d)")
+_RX_DATA = re.compile(r"(?<!\d)(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})(?!\d)")
+_RX_ROTULO = re.compile(
+    r"(?im)^\s*(nome(?: completo)?|data de nascimento|nascimento|data nasc\w*|dn|cpf|rg|identidade"
+    r"|endere[cç]o|end\.?)\s*[:=\-]\s*(.+?)\s*$")
+_ROTULO_CAMPO = {
+    "nome": "nome_completo", "nome completo": "nome_completo",
+    "data de nascimento": "nascimento", "nascimento": "nascimento", "dn": "nascimento",
+    "cpf": "cpf", "rg": "rg", "identidade": "rg", "endereco": "endereco", "endereço": "endereco",
+    "end": "endereco", "end.": "endereco",
+}
+_RX_ENDERECO = re.compile(
+    r"(?i)\b(rua|r\.|av\.?|avenida|travessa|tv\.|alameda|rodovia|estrada|bairro|quadra|qd\.?|lote|"
+    r"condom[ií]nio|residencial|setor|n[º°o]\s*\d|numero|número)\b")
+_RX_RG = re.compile(r"(?i)\b(?:rg|identidade)\s*(?:n[º°o.]*)?\s*(?:[:\-]|é|e|eh)?\s*([\dxX][\d.\-xX]{3,14})")
+
+
+def cpf_valido(digitos: str) -> bool:
+    if len(digitos) != 11 or len(set(digitos)) == 1:
+        return False
+    for n in (9, 10):
+        soma = sum(int(digitos[i]) * (n + 1 - i) for i in range(n))
+        if (soma * 10 % 11) % 10 != int(digitos[n]):
+            return False
+    return True
+
+
+def _formatar_cpf(d: str) -> str:
+    return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]}"
+
+
+def _data(m: re.Match) -> str:
+    dia, mes, ano = m.group(1), m.group(2), m.group(3)
+    if len(ano) == 2:
+        ano = ("19" if int(ano) > 30 else "20") + ano
+    if not (1 <= int(dia) <= 31 and 1 <= int(mes) <= 12 and 1900 <= int(ano) <= 2100):
+        return ""
+    return f"{int(dia):02d}/{int(mes):02d}/{ano}"
+
+
+def _eh_nome_completo(trecho: str) -> bool:
+    palavras = [p for p in trecho.split() if p.lower() not in _PARTICULAS]
+    return (len(palavras) >= 2 and bool(re.fullmatch(rf"[{_LETRAS}\s'-]+", trecho))
+            and not _RX_ENDERECO.search(trecho) and not clinica.classificar_areas(trecho))
+
+
+def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
+    """Le os dados do cadastro numa mensagem so, em qualquer ordem.
+
+    Aceita com rotulo ("CPF: 123...") ou sem ("José da Silva, 12/03/1990,
+    123.456.789-09, RG 1234567, Rua X, 123, Centro, Porto Velho"). Uma resposta
+    seca a pergunta de um campo so ("12/03/1990") vale para aquele campo.
+    """
+    achados: dict = {}
+    resto = texto or ""
+
+    for rotulo, valor in _RX_ROTULO.findall(resto):
+        campo = _ROTULO_CAMPO.get(clinica.normalizar(rotulo).rstrip("."), "")
+        if campo and valor:
+            achados[campo] = valor.strip()
+    resto = _RX_ROTULO.sub(" ", resto)
+
+    aviso_cpf = "O CPF informado parece ter algum número trocado. Pode conferir?"
+    # CPF com rotulo: confere o digito verificador e padroniza.
+    if "cpf" in achados:
+        dig = re.sub(r"\D", "", achados["cpf"])
+        if cpf_valido(dig):
+            achados["cpf"] = _formatar_cpf(dig)
+        else:
+            achados.pop("cpf")
+            achados["_aviso"] = aviso_cpf
+    # CPF sem rotulo: 11 digitos no formato de CPF. Invalido, ele e avisado e
+    # sai do texto - antes um CPF errado virava o RG.
+    for m in _RX_CPF.finditer(resto):
+        dig = "".join(m.groups())
+        if cpf_valido(dig) and "cpf" not in achados:
+            achados["cpf"] = _formatar_cpf(dig)
+        elif not cpf_valido(dig) and "cpf" not in achados:
+            achados["_aviso"] = aviso_cpf
+        resto = resto.replace(m.group(0), " ")
+
+    if "nascimento" in achados:
+        m = _RX_DATA.search(achados["nascimento"])
+        if m and _data(m):
+            achados["nascimento"] = _data(m)
+    m = _RX_DATA.search(resto)
+    if m and "nascimento" not in achados and _data(m):
+        achados["nascimento"] = _data(m)
+        resto = resto.replace(m.group(0), " ")
+
+    m = _RX_RG.search(resto)
+    if m and "rg" not in achados:
+        achados["rg"] = m.group(1).strip(".-")
+        resto = resto.replace(m.group(0), " ")
+
+    # O que sobrou, por pedaco: endereco a partir da palavra de logradouro;
+    # nome completo e o trecho so de letras com duas palavras ou mais.
+    resto = re.sub(r"(?i)\b(cpf|rg|nascimento|endere[cç]o|nome completo)\b", " ", resto)
+    if "endereco" not in achados:
+        m = _RX_ENDERECO.search(resto)
+        if m:
+            achados["endereco"] = " ".join(resto[m.start():].replace("\n", ", ").split()).strip(" ,;.")
+            resto = resto[:m.start()]
+    pedacos = [p.strip(" .;-") for p in re.split(r"[\n,;]+", resto) if p.strip(" .;-")]
+    if "nome_completo" not in achados:
+        for p in pedacos:
+            if _eh_nome_completo(p):
+                achados["nome_completo"] = _titulo(p)
+                pedacos.remove(p)
+                break
+    if "rg" not in achados:
+        for p in pedacos:
+            so_rg = re.fullmatch(r"[\dxX][\d.\-xX]{3,14}", p.replace(" ", ""))
+            if so_rg and len(re.sub(r"\D", "", p)) >= 5:
+                achados["rg"] = p.replace(" ", "")
+                break
+
+    # Resposta seca a pergunta de um campo so ("Rua X, 10" sem palavra-chave).
+    if campo_esperado and campo_esperado not in achados and not achados.get("_aviso"):
+        limpo = (texto or "").strip()
+        if campo_esperado == "endereco" and len(limpo) >= 8 and re.search(r"\d", limpo):
+            achados["endereco"] = " ".join(limpo.split())
+            # "Rio Madeira, 15": o nome da rua nao e o nome do paciente.
+            if not _RX_ROTULO.search(texto or ""):
+                achados.pop("nome_completo", None)
+        elif campo_esperado == "nome_completo" and _eh_nome_completo(limpo):
+            achados["nome_completo"] = _titulo(limpo)
+
+    if "nome_completo" in achados:
+        achados["nome_completo"] = _titulo(achados["nome_completo"])
+    return achados

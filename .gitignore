@@ -43,3 +43,6 @@ uploads/
 Audio*.txt
 /*.ogg
 /*.opus
+
+# Material de teste enviado pelo cliente (audio, prints, conversa)
+Corre*Solicitadas/

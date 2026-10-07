@@ -65,9 +65,17 @@ def e_so_cumprimento(texto: str) -> bool:
     return bool(_SO_CUMPRIMENTO.match(" ".join(sem_pontuacao.split())))
 
 
+# "Tudo bem?" no meio de "Olá / Tudo bem? / Gostaria de agendar" e cumprimento,
+# nao duvida: com ele a mensagem ia para o modelo, que escrevia um texto livre
+# ("Posso ajudar com o agendamento...") - teste do Dr. Fabricio, 06/10.
+_RX_PERGUNTA_DE_CUMPRIMENTO = re.compile(
+    r"(?i)\b(?:tudo bem|tudo bom|td bem|tudo certo|como vai|como (?:voce|vc) (?:esta|vai)|blz|beleza)\s*\?+")
+
+
 def tem_duvida_aberta(texto: str) -> bool:
-    t = clinica.normalizar(texto)
-    return "?" in (texto or "") or t.startswith(clinica.INTERROGATIVAS)
+    sem_cumprimento = _RX_PERGUNTA_DE_CUMPRIMENTO.sub(" ", clinica.normalizar(texto))
+    t = " ".join(sem_cumprimento.split())
+    return "?" in t or t.startswith(clinica.INTERROGATIVAS)
 
 
 @dataclass
@@ -147,7 +155,15 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     # ── 3. Confirmação do resumo (seção 18: CONFIRMAÇÃO) ─────────────────────
     if ficha.get("status") == "aguardando_confirmacao" and not midia:
         if ficha.get("ultima_pergunta") == "correcao":
-            if not fp.aplicar_correcao(ficha, texto):
+            corrigido = fp.aplicar_correcao(ficha, texto)
+            aviso = ficha.get("aviso_cadastro", "")
+            if aviso:
+                # CPF com número trocado: pede de novo, sem fingir que anotou.
+                ficha["aviso_cadastro"] = ""
+                d.tipos.append("correcao_invalida")
+                d.partes.append(aviso)
+                return fechar()
+            if not corrigido:
                 ficha["observacoes"] = (f"{ficha.get('observacoes', '')} {texto}").strip()[:500]
             d.tipos.append("correcao")
             d.partes.append("Anotado.")
@@ -268,12 +284,16 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     if capturou and not d.partes and not d.usar_llm:
         d.confirmacao = _confirmacao(ultima, ficha)
         # "Ana Paula, tudo bem?": responde ao cumprimento junto com o nome.
-        if ultima == "nome" and re.search(r"tudo (bem|bom|certo)", t):
+        if ultima == "nome" and re.search(r"\btudo (bem|bom|certo)\b", t):
             d.confirmacao += " Tudo ótimo por aqui."
-    elif (ultima == "queixa" and not ficha.get("queixa") and not d.partes and not d.usar_llm
-          and ficha.get("intencao") == "pronto_agendar"):
-        # "quero fazer uma avaliacao": reconhece o pedido antes de perguntar a queixa.
+    elif (not ficha.get("queixa") and not d.partes and not d.usar_llm
+          and ficha.get("intencao") == "pronto_agendar"
+          and (ultima == "queixa" or clinica.classificar_intencao(texto) == "pronto_agendar")):
+        # "Gostaria de agendar uma consulta": reconhece o pedido antes de
+        # perguntar nome/queixa, em texto fixo (antes ia para o modelo).
         d.confirmacao = "Claro, vamos agendar a sua avaliação!"
+        if _RX_PERGUNTA_DE_CUMPRIMENTO.search(t):
+            d.confirmacao = "Tudo ótimo por aqui! " + d.confirmacao
     elif texto and e_so_cumprimento(texto) and not abertura and not d.partes:
         # "Boa noite" no meio do atendimento: responde ao cumprimento antes de
         # repetir a pergunta, em vez de ignora-lo (teste de 02/10).
@@ -292,6 +312,14 @@ def _confirmacao(campo: str, ficha: dict) -> str:
     mesma mensagem da pergunta seguinte. Fixa por campo: nada oscila.
     """
     valor = clinica.normalizar(ficha.get(campo, ""))
+    if campo in fp.CADASTRO:
+        aviso = ficha.pop("aviso_cadastro", "") or ""
+        ficha["aviso_cadastro"] = ""
+        if aviso:
+            return aviso
+        if all(ficha.get(c) for c in fp.CADASTRO):
+            return "Cadastro completo, obrigada! Agora vamos ao agendamento."
+        return "Obrigada!"
     if campo == "nome" and ficha.get("nome"):
         return f"Prazer, {ficha['nome'].split()[0]}!"
     if campo == "sinais_gravidade":
