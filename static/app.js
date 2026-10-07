@@ -3540,7 +3540,10 @@ document.addEventListener('click', (e) => {
         || e.target.closest('.toast-container')
         || e.target.closest('#modal-overlay')
         || e.target.closest('.media-lightbox')
-        || e.target.closest('.sidebar')) return;
+        || e.target.closest('.sidebar')
+        // Clique que veio de outra aba (ex.: "Abrir conversa" em Agendamentos)
+        // e acabou de abrir a conversa: não pode fechá-la em seguida.
+        || e.target.closest('.view:not(#view-conversations)')) return;
     if (currentConvId != null) deselectConversation();
 });
 

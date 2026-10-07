@@ -726,11 +726,31 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
             time.sleep(pausa)
         if indice == 0:
             _esperar_piso(chegada)
-        res = send_text(user, chunk)
+        res = _enviar_com_retentativa(user, chunk)
         if not res.get("ok"):
             print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
+            # Fica no painel marcada com erro: a equipe ve que o paciente
+            # nao recebeu, em vez de a resposta sumir sem rastro.
+            send_msg_out_to_panel(user, chunk, status="error")
             continue
         send_msg_out_to_panel(user, chunk)
+
+
+# Falha passageira da Datafy (rede, timeout, 429, 5xx): tenta de novo antes de
+# desistir. Erro 4xx de verdade (numero invalido etc.) nao adianta repetir.
+_ESPERAS_REENVIO = (1.5, 4.0)
+
+
+def _enviar_com_retentativa(user: str, texto: str) -> dict:
+    res = send_text(user, texto)
+    for espera in _ESPERAS_REENVIO:
+        status = res.get("status") or 0
+        if res.get("ok") or not (status == 0 or status == 429 or status >= 500):
+            break
+        print(f"[flush] envio p/ {user} falhou ({res.get('error')}); nova tentativa em {espera}s")
+        time.sleep(espera)
+        res = send_text(user, texto)
+    return res
 
 # ── Flush handler ───────────────────────────────────────────────────────────
 
@@ -917,7 +937,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         import traceback
         traceback.print_exc()
 
-def send_msg_out_to_panel(user: str, text: str) -> None:
+def send_msg_out_to_panel(user: str, text: str, status: str = "sent") -> None:
     conv = database.get_or_create_conversation(user)
     database.save_message(
         conversation_id=conv["id"],
@@ -926,6 +946,7 @@ def send_msg_out_to_panel(user: str, text: str) -> None:
         body=text,
         sender="agent",
         msg_type="text",
+        status=status,
     )
     database.update_conversation(conv["id"], last_message_at=database.agora_utc())
     events.emit("message_sent", {"conversation_id": conv["id"], "phone": user, "body": text})

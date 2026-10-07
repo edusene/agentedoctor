@@ -15,6 +15,10 @@ class MessageBuffer:
         self._lock = threading.Lock()
         # {user: {"items": [{"text": ..., "msg_id": ..., "wa_message_id": ..., "wa_media_id": ...}], "timer": Timer | None}}
         self._state: dict[str, dict] = {}
+        # Um atendimento por vez para cada paciente: mensagem que chega enquanto
+        # a resposta anterior ainda esta sendo enviada espera a vez, em vez de
+        # ler e gravar a mesma ficha em paralelo.
+        self._em_atendimento: dict[str, threading.Lock] = {}
 
     def add(self, user: str, text: str, msg_id: int | None = None,
             wa_message_id: str = "", wa_media_id: str = "",
@@ -53,5 +57,8 @@ class MessageBuffer:
             # Limpa estado antes de chamar o callback (evita race condition)
             self._state[user] = {"items": [], "timer": None}
 
-        print(f"[buffer] flush user={user} msgs={len(items)}")
-        self._on_flush(user, items)
+        with self._lock:
+            vez = self._em_atendimento.setdefault(user, threading.Lock())
+        with vez:
+            print(f"[buffer] flush user={user} msgs={len(items)}")
+            self._on_flush(user, items)
