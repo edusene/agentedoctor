@@ -36,6 +36,15 @@
                     <span>Fila Humana</span>
                     <span class="badge badge-warning" id="human-queue-badge" style="display:none">0</span>
                 </a>
+                <a href="#" class="nav-item" data-view="agendamentos">
+                    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="9 16 11 18 15 14"/></svg></span>
+                    <span>Agendamentos</span>
+                    <span class="badge badge-warning" id="agendamentos-badge" style="display:none">0</span>
+                </a>
+                <a href="#" class="nav-item" data-view="agenda">
+                    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="8.01" y2="14"/><line x1="12" y1="14" x2="12.01" y2="14"/><line x1="16" y1="14" x2="16.01" y2="14"/><line x1="8" y1="18" x2="8.01" y2="18"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></span>
+                    <span>Agenda</span>
+                </a>
                 <a href="#" class="nav-item" data-view="contacts">
                     <span class="icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
                     <span>Contatos</span>
@@ -500,6 +509,45 @@
             </div>
 
             <!-- CRM -->
+            <!-- Confirmação de Agendamento -->
+            <div id="view-agendamentos" class="view">
+                <div class="ag-header">
+                    <div>
+                        <h1>Confirmação de Agendamento</h1>
+                        <p class="muted ag-sub">Pedidos que a assistente encaminhou. Escolha dia e horário: o paciente recebe a confirmação no WhatsApp e o horário vai para a Agenda.</p>
+                    </div>
+                    <button class="btn-secondary btn-sm" onclick="loadAgendamentosPendentes()">Atualizar</button>
+                </div>
+                <div id="ag-pendentes" class="ag-lista"></div>
+            </div>
+
+            <!-- Agenda -->
+            <div id="view-agenda" class="view">
+                <div class="ag-header">
+                    <h1>Agenda</h1>
+                    <div class="agenda-controles">
+                        <button class="btn-secondary btn-sm" onclick="agendaMover(-1)" aria-label="Anterior">&lsaquo;</button>
+                        <button class="btn-secondary btn-sm" onclick="agendaHoje()">Hoje</button>
+                        <button class="btn-secondary btn-sm" onclick="agendaMover(1)" aria-label="Próximo">&rsaquo;</button>
+                        <span id="agenda-titulo" class="agenda-titulo"></span>
+                        <div class="agenda-modo">
+                            <button id="agenda-modo-mes" class="active" onclick="agendaModo('mes')">Mês</button>
+                            <button id="agenda-modo-semana" onclick="agendaModo('semana')">Semana</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="agenda-google" class="agenda-google"></div>
+                <div id="agenda-grade" class="agenda-grade"></div>
+                <div class="agenda-rodape">
+                    <label class="muted">Duração padrão da avaliação
+                        <select id="agenda-duracao-padrao" class="select-sm" onchange="salvarDuracaoPadrao(this.value)">
+                            <option value="30">30 min</option><option value="45">45 min</option>
+                            <option value="60">1 hora</option><option value="90">1h30</option><option value="120">2 horas</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+
             <div id="view-crm" class="view">
                 <div class="crm-layout">
                     <div class="crm-sidebar">
@@ -507,15 +555,7 @@
                             <h2>CRM</h2>
                         </div>
                         <nav class="crm-nav">
-                            <a href="#" class="crm-nav-item active" data-crm-view="dashboard" onclick="switchCrmView('dashboard')">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-                                Visao Geral
-                            </a>
-                            <a href="#" class="crm-nav-item" data-crm-view="contacts" onclick="switchCrmView('contacts')">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                                Contatos
-                            </a>
-                            <a href="#" class="crm-nav-item" data-crm-view="automations" onclick="switchCrmView('automations')">
+                            <a href="#" class="crm-nav-item active" data-crm-view="automations" onclick="switchCrmView('automations')">
                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                                 Automacoes
                             </a>
@@ -530,55 +570,9 @@
                         </nav>
                     </div>
                     <div class="crm-content">
-                        <!-- CRM Dashboard -->
-                        <div id="crm-view-dashboard" class="crm-subview active">
-                            <h1>Visao Geral</h1>
-                            <div class="crm-stats-grid" id="crm-stats-grid"></div>
-                        </div>
-                        <!-- CRM Contacts -->
-                        <div id="crm-view-contacts" class="crm-subview">
-                            <div class="crm-contacts-header">
-                                <h1>Contatos</h1>
-                                <div class="crm-contacts-filters">
-                                    <input type="text" id="crm-contact-search" placeholder="Buscar nome ou telefone..." oninput="loadCrmContacts()">
-                                    <select id="crm-contact-status-filter" onchange="loadCrmContacts()">
-                                        <option value="">Todos os status</option>
-                                        <option value="novo">Novo</option>
-                                        <option value="em_atendimento">Em Atendimento</option>
-                                        <option value="cliente">Cliente</option>
-                                        <option value="inativo">Inativo</option>
-                                        <option value="nao_interessado">Nao Interessado</option>
-                                    </select>
-                                    <select id="crm-contact-days-filter" onchange="loadCrmContacts()">
-                                        <option value="">Qualquer tempo</option>
-                                        <option value="7">7+ dias sem interacao</option>
-                                        <option value="15">15+ dias sem interacao</option>
-                                        <option value="30">30+ dias sem interacao</option>
-                                        <option value="60">60+ dias sem interacao</option>
-                                        <option value="90">90+ dias sem interacao</option>
-                                    </select>
-                                    <select id="crm-contact-followup-filter" onchange="loadCrmContacts()">
-                                        <option value="">Todos</option>
-                                        <option value="sim">Com follow-up pendente</option>
-                                        <option value="nao">Sem follow-up pendente</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div id="crm-contacts-list" class="crm-contacts-list"></div>
-                            <!-- Perfil do contato -->
-                            <div id="crm-contact-profile" class="crm-contact-profile" style="display:none">
-                                <div class="crm-profile-header">
-                                    <button class="btn-back" onclick="closeCrmContactProfile()">&larr; Voltar</button>
-                                    <h2 id="crm-profile-name"></h2>
-                                </div>
-                                <div class="crm-profile-body">
-                                    <div class="crm-profile-info" id="crm-profile-info"></div>
-                                    <div class="crm-profile-messages" id="crm-profile-messages"></div>
-                                </div>
-                            </div>
-                        </div>
-                        <!-- CRM Automations -->
-                        <div id="crm-view-automations" class="crm-subview">
+                        <!-- CRM: so automacoes de mensagem (lembretes, marketing).
+                             Agendamento tem abas proprias (Agendamentos e Agenda). -->
+                        <div id="crm-view-automations" class="crm-subview active">
                             <div class="crm-automations-header">
                                 <h1>Automacoes</h1>
                                 <button class="btn-primary" onclick="showCrmAutomationForm()">

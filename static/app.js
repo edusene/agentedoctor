@@ -162,7 +162,14 @@ function loadView(view) {
             startWAConnectionPolling();
             break;
         case 'crm':
-            switchCrmView('dashboard');
+            switchCrmView('automations');
+            break;
+        case 'agendamentos':
+            loadAgendamentosPendentes();
+            pollTimers.push(setInterval(loadAgendamentosPendentes, 20000));
+            break;
+        case 'agenda':
+            loadAgenda();
             break;
     }
 }
@@ -3007,6 +3014,10 @@ function connectSSE() {
                 }
             }
             if (currentView === 'dashboard') debouncedLoadDashboard();
+        } else if (event === 'agendamento_atualizado') {
+            updateAgendamentosBadge();
+            if (currentView === 'agendamentos') loadAgendamentosPendentes();
+            else if (currentView === 'agenda') loadAgenda();
         } else if (event === 'conversation_updated') {
             debouncedLoadConversations();
             updateUnreadBadge();
@@ -3114,11 +3125,316 @@ function closeQR() {
     // Removido: QR container nao existe mais na aba Datafy
 }
 
+/* ── Agendamentos (Confirmação de Agendamento) ─────────────────────────────── */
+const DIAS_CURTOS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho',
+               'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+let agendaDuracaoPadrao = 60;
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function isoDia(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function quandoAgendamento(inicio) {
+    if (!inicio) return '-';
+    const d = new Date(inicio);
+    return `${DIAS_CURTOS[d.getDay()]}, ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} às ${pad2(d.getHours())}h${pad2(d.getMinutes())}`;
+}
+function duracaoTexto(min) {
+    min = Number(min) || 60;
+    const h = Math.floor(min / 60), m = min % 60;
+    return h ? `${h}h${m ? pad2(m) : ''}` : `${m} min`;
+}
+
+async function updateAgendamentosBadge() {
+    const data = await api('/api/agendamentos/pendentes/count');
+    const badge = document.getElementById('agendamentos-badge');
+    if (!data || !badge) return;
+    badge.textContent = data.count;
+    badge.style.display = data.count > 0 ? 'inline-flex' : 'none';
+}
+
+async function loadAgendamentosPendentes() {
+    const lista = document.getElementById('ag-pendentes');
+    if (!lista) return;
+    if (!lista.dataset.loaded) lista.innerHTML = skeletonRows(3);
+    const ags = await api('/api/agendamentos?status=pendente');
+    lista.dataset.loaded = '1';
+    updateAgendamentosBadge();
+    if (!ags || ags.length === 0) {
+        lista.innerHTML = '<div class="empty-state">Nenhum agendamento aguardando confirmação 🎉</div>';
+        return;
+    }
+    lista.innerHTML = ags.map(a => {
+        const recebido = a.created_at ? new Date(a.created_at + 'Z').toLocaleString('pt-BR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '';
+        const disp = (a.ficha && a.ficha.disponibilidade) || '';
+        return `
+        <div class="ag-card">
+            <div class="ag-card-topo">
+                <div>
+                    <div class="ag-nome">${esc(a.nome)}</div>
+                    <div class="muted ag-meta">${esc(a.phone)} · pedido em ${recebido}</div>
+                </div>
+                ${disp ? `<div class="ag-pref">Prefere: <strong>${esc(disp.replace(/\n/g, ' / '))}</strong></div>` : ''}
+            </div>
+            <pre class="ag-resumo">${esc(a.resumo || '')}</pre>
+            <div class="ag-acoes">
+                <button class="btn-secondary btn-sm" onclick="abrirConversaAgendamento(${a.conversation_id})">Abrir conversa</button>
+                <button class="btn-secondary btn-sm ag-cancelar" onclick="cancelarAgendamento(${a.id}, false)">Cancelar pedido</button>
+                <button class="btn-primary btn-sm" onclick="formHorarioAgendamento(${a.id}, false)">Confirmar horário</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function abrirConversaAgendamento(convId) {
+    if (!convId) { toast('Conversa não encontrada', 'error'); return; }
+    closeModal();
+    switchView('conversations');
+    selectConversation(convId);
+}
+
+async function formHorarioAgendamento(agId, remarcar) {
+    const a = await api(`/api/agendamentos/${agId}`);
+    if (!a || a.error) { toast('Agendamento não encontrado', 'error'); return; }
+    const ini = a.inicio ? new Date(a.inicio) : null;
+    const data = ini ? isoDia(ini) : '';
+    const hora = ini ? `${pad2(ini.getHours())}:${pad2(ini.getMinutes())}` : '';
+    const duracao = a.duracao_min || agendaDuracaoPadrao;
+    const opcoes = [30, 45, 60, 90, 120];
+    if (!opcoes.includes(Number(duracao))) opcoes.push(Number(duracao));
+    const disp = (a.ficha && a.ficha.disponibilidade) || '';
+    document.getElementById('modal-title').textContent = remarcar ? 'Remarcar avaliação' : 'Confirmar horário';
+    document.getElementById('modal-body').innerHTML = `
+        <form onsubmit="salvarHorarioAgendamento(event, ${agId}, ${remarcar}, false)">
+            <p><strong>${esc(a.nome)}</strong> · ${esc(a.phone)}</p>
+            ${disp ? `<p class="muted">Preferência do paciente: ${esc(disp.replace(/\n/g, ' / '))}</p>` : ''}
+            <div class="ag-form-linha">
+                <div class="form-group"><label>Data</label><input type="date" name="data" value="${data}" min="${isoDia(new Date())}" required></div>
+                <div class="form-group"><label>Horário</label><input type="time" name="hora" value="${hora}" step="300" required></div>
+                <div class="form-group"><label>Duração</label>
+                    <select name="duracao_min">${opcoes.sort((x, y) => x - y).map(m =>
+                        `<option value="${m}" ${Number(duracao) === m ? 'selected' : ''}>${duracaoTexto(m)}</option>`).join('')}</select></div>
+            </div>
+            <div class="form-group"><label>Observações (opcional)</label><textarea name="observacoes" rows="2">${esc(a.observacoes || '')}</textarea></div>
+            <label class="ag-check"><input type="checkbox" name="avisar" checked> Avisar o paciente no WhatsApp</label>
+            <div id="ag-conflito"></div>
+            <button type="submit" class="btn-primary">${remarcar ? 'Salvar novo horário' : 'Confirmar agendamento'}</button>
+        </form>`;
+    document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+async function salvarHorarioAgendamento(e, agId, remarcar, forcar) {
+    if (e) e.preventDefault();
+    const form = document.querySelector('#modal-body form');
+    const f = new FormData(form);
+    const corpo = {
+        data: f.get('data'), hora: f.get('hora'), duracao_min: Number(f.get('duracao_min')),
+        observacoes: f.get('observacoes') || '', avisar: f.get('avisar') === 'on', forcar,
+    };
+    const btn = form.querySelector('button[type="submit"]');
+    setBtnLoading(btn, true, 'Salvando...');
+    const r = await api(remarcar ? `/api/agendamentos/${agId}` : `/api/agendamentos/${agId}/confirmar`,
+                        { method: remarcar ? 'PUT' : 'POST', body: JSON.stringify(corpo) });
+    setBtnLoading(btn, false);
+    if (r && r.error === 'conflito') {
+        document.getElementById('ag-conflito').innerHTML = `
+            <div class="ag-alerta">Já existe avaliação nesse horário: ${r.conflitos.map(c =>
+                `<strong>${esc(c.nome)}</strong> (${quandoAgendamento(c.inicio)})`).join(', ')}.
+                <button type="button" class="btn-secondary btn-sm" onclick="salvarHorarioAgendamento(null, ${agId}, ${remarcar}, true)">Agendar mesmo assim</button>
+            </div>`;
+        return;
+    }
+    if (!r || r.error) { toast(friendlyError(r?.error || 'Erro ao salvar'), 'error'); return; }
+    closeModal();
+    let msg = remarcar ? 'Avaliação remarcada' : 'Agendamento confirmado';
+    if (corpo.avisar) msg += r.avisado ? ' e paciente avisado' : ' (o aviso no WhatsApp não saiu)';
+    toast(msg, r.avisado || !corpo.avisar ? 'success' : 'error');
+    if (r.erro_google) toast('Não sincronizou com o Google Calendar: ' + r.erro_google, 'error');
+    updateAgendamentosBadge();
+    if (currentView === 'agendamentos') loadAgendamentosPendentes();
+    if (currentView === 'agenda') loadAgenda();
+}
+
+async function cancelarAgendamento(agId, confirmado) {
+    document.getElementById('modal-title').textContent = confirmado ? 'Cancelar avaliação' : 'Cancelar pedido';
+    document.getElementById('modal-body').innerHTML = `
+        <p>${confirmado ? 'A avaliação sai da Agenda (e do Google Calendar, se conectado).' : 'O pedido sai da lista de confirmação.'}</p>
+        ${confirmado ? '<label class="ag-check"><input type="checkbox" id="ag-cancelar-avisar" checked> Avisar o paciente no WhatsApp</label>' : ''}
+        <div class="ag-acoes">
+            <button class="btn-secondary" onclick="closeModal()">Voltar</button>
+            <button class="btn-primary ag-btn-perigo" onclick="executarCancelamento(${agId})">Cancelar ${confirmado ? 'avaliação' : 'pedido'}</button>
+        </div>`;
+    document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+async function executarCancelamento(agId) {
+    const avisar = !!document.getElementById('ag-cancelar-avisar')?.checked;
+    const r = await api(`/api/agendamentos/${agId}/cancelar`, { method: 'POST', body: JSON.stringify({ avisar }) });
+    if (!r || r.error) { toast(friendlyError(r?.error || 'Erro ao cancelar'), 'error'); return; }
+    closeModal();
+    toast(avisar ? (r.avisado ? 'Cancelado e paciente avisado' : 'Cancelado (o aviso não saiu)') : 'Cancelado', 'success');
+    updateAgendamentosBadge();
+    if (currentView === 'agendamentos') loadAgendamentosPendentes();
+    if (currentView === 'agenda') loadAgenda();
+}
+
+/* ── Agenda (calendário de confirmados) ────────────────────────────────────── */
+let agendaRef = new Date();
+let agendaModoAtual = 'mes';
+let agendaReq = 0;
+
+function agendaIntervalo() {
+    if (agendaModoAtual === 'semana') {
+        const ini = new Date(agendaRef); ini.setHours(0, 0, 0, 0);
+        ini.setDate(ini.getDate() - ini.getDay());
+        const fim = new Date(ini); fim.setDate(fim.getDate() + 7);
+        return [ini, fim];
+    }
+    const primeiro = new Date(agendaRef.getFullYear(), agendaRef.getMonth(), 1);
+    const ini = new Date(primeiro); ini.setDate(1 - primeiro.getDay());
+    const fim = new Date(ini); fim.setDate(fim.getDate() + 42);
+    return [ini, fim];
+}
+
+function agendaMover(delta) {
+    if (agendaModoAtual === 'semana') agendaRef.setDate(agendaRef.getDate() + 7 * delta);
+    else agendaRef = new Date(agendaRef.getFullYear(), agendaRef.getMonth() + delta, 1);
+    loadAgenda();
+}
+function agendaHoje() { agendaRef = new Date(); loadAgenda(); }
+function agendaModo(modo) {
+    agendaModoAtual = modo;
+    document.getElementById('agenda-modo-mes').classList.toggle('active', modo === 'mes');
+    document.getElementById('agenda-modo-semana').classList.toggle('active', modo === 'semana');
+    loadAgenda();
+}
+
+async function loadAgenda() {
+    const req = ++agendaReq;
+    const [ini, fim] = agendaIntervalo();
+    const titulo = document.getElementById('agenda-titulo');
+    titulo.textContent = agendaModoAtual === 'semana'
+        ? `${pad2(ini.getDate())}/${pad2(ini.getMonth() + 1)} – ${pad2(new Date(fim - 1).getDate())}/${pad2(new Date(fim - 1).getMonth() + 1)}`
+        : `${MESES[agendaRef.getMonth()][0].toUpperCase()}${MESES[agendaRef.getMonth()].slice(1)} de ${agendaRef.getFullYear()}`;
+    const [ags, cfg] = await Promise.all([
+        api(`/api/agendamentos?status=confirmado&de=${isoDia(ini)}&ate=${isoDia(fim)}`),
+        api('/api/settings/agenda'),
+    ]);
+    if (req !== agendaReq) return;  // usuario ja navegou para outro periodo
+    if (cfg) {
+        agendaDuracaoPadrao = cfg.duracao_padrao || 60;
+        const sel = document.getElementById('agenda-duracao-padrao');
+        if (sel) {
+            if (![...sel.options].some(o => Number(o.value) === agendaDuracaoPadrao)) {
+                sel.insertAdjacentHTML('beforeend', `<option value="${agendaDuracaoPadrao}">${duracaoTexto(agendaDuracaoPadrao)}</option>`);
+            }
+            sel.value = String(agendaDuracaoPadrao);
+        }
+        renderGoogleStatus(cfg.google || {});
+    }
+    renderAgenda(ags || [], ini, fim);
+}
+
+function renderAgenda(ags, ini, fim) {
+    const porDia = {};
+    ags.forEach(a => { (porDia[(a.inicio || '').slice(0, 10)] ||= []).push(a); });
+    const hoje = isoDia(new Date());
+    const dias = [];
+    for (let d = new Date(ini); d < fim; d.setDate(d.getDate() + 1)) dias.push(new Date(d));
+    const chip = a => `<button class="agenda-evento" onclick="detalheAgendamento(${a.id})" title="${esc(a.nome)}">
+        <span class="agenda-hora">${(a.inicio || '').slice(11, 16)}</span> ${esc(a.nome)}</button>`;
+    const semana = agendaModoAtual === 'semana';
+    document.getElementById('agenda-grade').innerHTML = `
+        <div class="agenda-cabecalho">${DIAS_CURTOS.map(d => `<div>${d}</div>`).join('')}</div>
+        <div class="agenda-dias ${semana ? 'agenda-semana' : ''}">
+            ${dias.map(d => {
+                const k = isoDia(d);
+                const fora = !semana && d.getMonth() !== agendaRef.getMonth();
+                return `<div class="agenda-dia ${fora ? 'fora' : ''} ${k === hoje ? 'hoje' : ''}">
+                    <div class="agenda-num">${semana ? `${DIAS_CURTOS[d.getDay()]} ` : ''}${d.getDate()}</div>
+                    ${(porDia[k] || []).map(chip).join('')}
+                </div>`;
+            }).join('')}
+        </div>
+        ${ags.length ? '' : '<p class="muted agenda-vazia">Nenhuma avaliação confirmada neste período.</p>'}`;
+}
+
+async function detalheAgendamento(agId) {
+    const a = await api(`/api/agendamentos/${agId}`);
+    if (!a || a.error) { toast('Agendamento não encontrado', 'error'); return; }
+    document.getElementById('modal-title').textContent = a.nome;
+    document.getElementById('modal-body').innerHTML = `
+        <div class="ag-detalhe">
+            <p><strong>${quandoAgendamento(a.inicio)}</strong> · ${duracaoTexto(a.duracao_min)}</p>
+            <p class="muted">${esc(a.phone)}${a.google_event_id ? ' · no Google Calendar' : ''}</p>
+            ${a.observacoes ? `<p><strong>Observações:</strong> ${esc(a.observacoes)}</p>` : ''}
+            <pre class="ag-resumo">${esc(a.resumo || '')}</pre>
+            <div class="ag-acoes">
+                <button class="btn-secondary btn-sm" onclick="abrirConversaAgendamento(${a.conversation_id})">Abrir conversa</button>
+                <button class="btn-secondary btn-sm ag-cancelar" onclick="cancelarAgendamento(${a.id}, true)">Cancelar</button>
+                <button class="btn-primary btn-sm" onclick="formHorarioAgendamento(${a.id}, true)">Remarcar</button>
+            </div>
+        </div>`;
+    document.getElementById('modal-overlay').style.display = 'flex';
+}
+
+async function salvarDuracaoPadrao(valor) {
+    const r = await api('/api/settings/agenda', { method: 'PUT', body: JSON.stringify({ duracao_padrao: Number(valor) }) });
+    if (r && r.ok) { agendaDuracaoPadrao = r.duracao_padrao; toast(`Duração padrão: ${duracaoTexto(r.duracao_padrao)}`, 'success'); }
+    else toast(friendlyError(r?.error || 'Erro ao salvar'), 'error');
+}
+
+/* ── Google Calendar ───────────────────────────────────────────────────────── */
+function renderGoogleStatus(g) {
+    const box = document.getElementById('agenda-google');
+    if (!box) return;
+    if (!g.configurado) {
+        box.innerHTML = `<span class="muted">Google Calendar não configurado: a agenda fica só no painel.
+            Para sincronizar, cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no Render.</span>`;
+    } else if (!g.conectado) {
+        box.innerHTML = `<span class="muted">A agenda está só no painel.</span>
+            <a class="btn-primary btn-sm" href="/api/google/conectar">Conectar Google Calendar</a>`;
+    } else {
+        box.innerHTML = `<span class="agenda-google-ok">● Sincronizado com o Google Calendar${g.email ? ` (${esc(g.email)})` : ''}</span>
+            <button class="btn-secondary btn-sm" onclick="sincronizarGoogle()">Sincronizar agora</button>
+            <button class="btn-secondary btn-sm" onclick="desconectarGoogle()">Desconectar</button>`;
+    }
+}
+
+async function sincronizarGoogle() {
+    const r = await api('/api/google/sincronizar', { method: 'POST' });
+    if (!r || r.error) { toast(friendlyError(r?.error || 'Erro ao sincronizar'), 'error'); return; }
+    toast(r.erros && r.erros.length ? `Sincronizado com falhas: ${r.erros[0]}` : `Sincronizado (${r.enviados} novo(s))`,
+          r.erros && r.erros.length ? 'error' : 'success');
+    loadAgenda();
+}
+
+async function desconectarGoogle() {
+    const r = await api('/api/google/desconectar', { method: 'POST' });
+    if (r && r.ok) { toast('Google Calendar desconectado. A agenda continua no painel.', 'success'); loadAgenda(); }
+}
+
+function avisoRetornoGoogle() {
+    const p = new URLSearchParams(location.search).get('google');
+    if (!p) return;
+    history.replaceState(null, '', location.pathname);
+    const msgs = {
+        conectado: ['Google Calendar conectado!', 'success'],
+        cancelado: ['Conexão com o Google cancelada', 'info'],
+        nao_configurado: ['Cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no Render antes de conectar', 'error'],
+        erro: ['Não foi possível conectar ao Google Calendar', 'error'],
+    };
+    const [m, t] = msgs[p] || msgs.erro;
+    toast(m, t);
+    switchView('agenda');
+}
+
 /* ── Init ─────────────────────────────────────────────────────────────────── */
 loadDashboard();
 loadGlobalAgentMode();
 connectSSE();
 updateUnreadBadge();
+updateAgendamentosBadge();
+avisoRetornoGoogle();
 
 // Pausa/retoma o polling de status da instância conforme a visibilidade da aba
 document.addEventListener('visibilitychange', () => {

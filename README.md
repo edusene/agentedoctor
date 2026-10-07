@@ -27,11 +27,27 @@ procedimento, não interpretar exame, não prometer resultado, não prescrever,
 não dar preço. Foto e documento enviados pelo paciente **não vão ao modelo**:
 o agente registra que há exame e diz que o Dr. Fabrício avalia na consulta.
 
-Quando o paciente confirma o resumo, o agente cria uma **tarefa** "Agendar
-avaliação" no CRM com a ficha completa e passa a conversa para a **fila
-humana**. Traumas entram marcados como prioridade. Sinais de emergência
-recebem na hora a orientação de procurar pronto-socorro/SAMU (192), e a
-conversa é transferida.
+Quando o paciente confirma o resumo, o pedido entra como **pendente** na aba
+**Agendamentos** (Confirmação de Agendamento), com a ficha completa, e a
+conversa vai para a **fila humana**. Traumas entram marcados como prioridade.
+Sinais de emergência recebem na hora a orientação de procurar
+pronto-socorro/SAMU (192), e a conversa é transferida.
+
+### Agendamentos e Agenda (painel)
+
+- **Agendamentos**: os pedidos pendentes, com a preferência de horário do
+  paciente. "Abrir conversa" leva ao chat; "Confirmar horário" escolhe data,
+  hora e duração (padrão de 1 hora, ajustável), avisa o paciente no WhatsApp
+  e manda o horário para a Agenda. Horário ocupado gera alerta de conflito.
+- **Agenda**: calendário (mês e semana) com as avaliações confirmadas; cada
+  uma abre o resumo, com opções de remarcar e cancelar, ambas com aviso
+  opcional ao paciente.
+- **Google Calendar (opcional)**: com `GOOGLE_CLIENT_ID` e
+  `GOOGLE_CLIENT_SECRET` no Render, o botão "Conectar Google Calendar" na
+  Agenda liga a conta do consultório. A partir daí, confirmar, remarcar e
+  cancelar refletem no calendário. Sem conexão, tudo fica só no painel.
+- **CRM**: só automações de mensagem (lembretes, marketing): Automações,
+  Follow-ups e Logs.
 
 ---
 
@@ -126,6 +142,7 @@ transferem direto para a equipe.
 app.py               webhook, pipeline do agente, rotas do painel
 clinica.py           base travada em código (respostas, triagem, conferência)
 secretaria.py        decide cada resposta (fluxo da seção 18)
+google_agenda.py     sincronização opcional com o Google Calendar (OAuth)
 ficha_paciente.py    memória do paciente (seção 14), persistida no banco
 knowledge_rag.py     chunking, embeddings, busca semântica
 documentos.py        extração de texto de PDF/DOCX

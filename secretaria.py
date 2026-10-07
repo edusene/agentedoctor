@@ -176,7 +176,9 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
             ficha["ultima_pergunta"] = ""
             d.tipos.append("encaminhado")
             d.partes.append(clinica.RESPOSTA_ENCAMINHADO)
-            d.partes.append(clinica.orientacoes_pre_consulta())
+            orientacoes = clinica.orientacoes_pre_consulta(ficha)
+            if orientacoes:
+                d.partes.append(orientacoes)
             d.encaminhar = True
             return fechar()
         if clinica.e_nao(texto) and "?" not in texto:
@@ -325,7 +327,7 @@ def _confirmacao(campo: str, ficha: dict) -> str:
     if campo == "sinais_gravidade":
         return "Obrigada por responder."
     if campo == "exames":
-        return ("Sem problema, isso pode ser visto na avaliação." if valor.startswith(("nao", "ainda nao"))
+        return ("Sem problema." if valor.startswith(("nao", "ainda nao"))
                 else "Ótimo, leve no dia da avaliação.")
     if campo == "avaliacao_previa":
         profissional = re.search(r"\b(dentista|ortodontista|medic|doutor|doutora|dr|dra|implantodontista|cirurgiao)", valor)
@@ -336,7 +338,7 @@ def _confirmacao(campo: str, ficha: dict) -> str:
         "detalhe_area": "Obrigada pelos detalhes.",
         "tempo_queixa": "Entendi.",
         "cidade": "Perfeito.",
-        "disponibilidade": "Vou deixar a sua preferência registrada.",
+        "disponibilidade": "Anotado.",
         "tipo_consulta": "Certo.",
         "saude": "Obrigada pelas informações.",
     }.get(campo, "")
@@ -403,11 +405,14 @@ def _proximo_passo(ficha: dict, d: Decisao, cobre_queixa: bool, repetir: bool = 
         return
 
     campo = fp.proximo_campo(ficha)
+    # A mesma pergunta da mensagem anterior (o paciente nao respondeu): vai a
+    # versao curta. Repetir a frase inteira era texto a toa (teste de 07/10).
+    repetida = bool(campo) and ficha.get("ultima_pergunta") == campo
     if campo:
         fp.marcar_pergunta(ficha, campo)
         if campo == "queixa" and cobre_queixa:
             return  # a resposta da seção 17 já pede a queixa
-        d.pergunta_final = fp.pergunta_do_campo(ficha, campo)
+        d.pergunta_final = fp.pergunta_do_campo(ficha, campo, repetida=repetida)
         return
 
     # Ficha completa: resumo e confirmação (seção 18).

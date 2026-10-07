@@ -165,18 +165,41 @@ RESPOSTA_DUVIDA_GENERICA = (
 
 # Seção 18: ... AGENDAMENTO → CONFIRMAÇÃO → ORIENTAÇÕES PRÉ-CONSULTA.
 RESPOSTA_ENCAMINHADO = (
-    "Perfeito! Sua solicitação foi encaminhada à equipe do Dr. Fabrício, que vai "
-    "confirmar o dia e o horário da sua avaliação por aqui mesmo."
+    "Perfeito! Sua solicitação foi encaminhada à equipe, que vai confirmar o dia "
+    "e o horário da sua avaliação por aqui."
 )
 
 
-def orientacoes_pre_consulta() -> str:
-    """Seção 18. O protocolo real da clínica entra por CLINICA_ORIENTACOES."""
-    return info_clinica("orientacoes") or (
-        "Para a avaliação, leve seus exames (radiografia, tomografia, laudos) e o "
-        "encaminhamento do seu dentista ou médico, se tiver. Se usa medicamentos, "
-        "leve também a lista deles."
-    )
+_SEM_DADO = ("nao", "ainda nao", "nada relatado")
+
+
+def _tem(valor: str) -> bool:
+    v = normalizar(valor)
+    return bool(v) and not v.startswith(_SEM_DADO)
+
+
+def orientacoes_pre_consulta(ficha: dict | None = None) -> str:
+    """Seção 18, só com o que vale para ESTE paciente.
+
+    Antes era um texto fixo: quem disse que não tinha exames ouvia "leve seus
+    exames" (teste de 07/10). O protocolo real da clínica entra por
+    CLINICA_ORIENTACOES e, se existir, vale para todos.
+    """
+    fixo = info_clinica("orientacoes")
+    if fixo or ficha is None:
+        return fixo
+    itens = []
+    if _tem(ficha.get("exames", "")):
+        itens.append("seus exames")
+    indicacao = normalizar(ficha.get("avaliacao_previa", ""))
+    if indicacao == "sim" or re.search(r"\b(dentista|ortodontista|medic|implantodontista)", indicacao):
+        itens.append("o encaminhamento do seu dentista ou médico, se tiver")
+    if _tem(ficha.get("saude", "")):
+        itens.append("a lista dos medicamentos que você usa")
+    if not itens:
+        return ""
+    lista = itens[0] if len(itens) == 1 else ", ".join(itens[:-1]) + " e " + itens[-1]
+    return f"Para a avaliação, leve {lista}."
 
 
 def resposta_preco() -> str:

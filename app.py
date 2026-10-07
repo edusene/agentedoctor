@@ -42,6 +42,7 @@ import clinica
 import ficha_paciente
 import secretaria
 import documentos
+import google_agenda
 import scheduler as crm_scheduler
 
 from meta import send_text, mark_read, send_typing, download_media_bytes
@@ -565,16 +566,10 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
             database.update_conversation(conv["id"], last_message_at=database.agora_utc())
         else:
             print(f"[transfer] WARN: falha ao enviar msg de transferência p/ {phone}: {res.get('error')}")
-    else:
-        # Salva a mensagem de transferência no banco para envio posterior
-        database.save_message(
-            conversation_id=conv["id"],
-            phone=phone,
-            direction="out",
-            body=transfer_msg,
-            sender="agent",
-            msg_type="text",
-        )
+    # Sem envio (agendamento confirmado, emergencia): o paciente ja recebeu a
+    # mensagem do proprio agente. Antes a de transferencia era GRAVADA como
+    # enviada mesmo assim - aparecia no painel e nunca chegava no WhatsApp
+    # (teste de 07/10). "Envio posterior" nunca existiu.
 
     # Emite evento SSE para o painel atualizar em tempo real
     events.emit("conversation_updated", {
@@ -592,8 +587,7 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
 _PALAVRA_RESET_PADRAO = "#reset"
 
 _MENSAGEM_RESET_PADRAO = (
-    "Prontinho, recomecei o atendimento do zero! Aqui é a assistente virtual do "
-    "consultório do Dr. Fabrício Guimarães. " + ficha_paciente.PERGUNTAS["nome"]
+    "Prontinho, recomecei o atendimento do zero! " + ficha_paciente.PERGUNTAS["nome"]
 )
 
 
@@ -778,32 +772,35 @@ def _texto_do_lote(items: list[dict]) -> str:
 
 
 def _registrar_encaminhamento(user: str, ficha: dict) -> None:
-    """Agendamento confirmado: nota interna, tarefa no CRM e fila humana.
+    """Paciente confirmou o resumo: vira agendamento PENDENTE no painel.
 
-    A agenda real e da equipe. O agente entrega o caso pronto - resumo da
-    ficha e prioridade - para quem vai marcar o horario.
+    A equipe ve o pedido na aba Confirmação de Agendamento, escolhe dia e hora
+    e confirma (o paciente recebe a confirmacao no WhatsApp e o horario entra
+    na Agenda). Antes ia para o CRM como tarefa; o Dr. Fabricio pediu as duas
+    abas proprias e o CRM so para automacoes (07/10).
     """
     area = clinica.AREAS.get(ficha.get("area"), {})
     prioridade = "PRIORIDADE (trauma) - " if ficha.get("area") == "trauma" else ""
     titulo = f"{prioridade}Agendar avaliacao - {ficha.get('nome') or user}"
-    descricao = (f"{ficha_paciente.resumo(ficha)}\n\nArea provavel (triagem, nao e diagnostico): "
-                 f"{area.get('nome', 'nao identificada')}\nIntencao: {ficha.get('intencao', '')}")
+    linhas = ficha_paciente.resumo(ficha).splitlines()[1:]  # sem "Confira os dados..."
+    resumo = "\n".join(linhas + [f"• Área provável (triagem, não é diagnóstico): "
+                                 f"{area.get('nome', 'não identificada')}"])
     try:
         contact = database.get_contact(user) or database.upsert_contact(user)
-        database.create_task(contact["id"], titulo, descricao)
-        # CRM: status proprio e a ficha nas observacoes do contato. A tarefa
-        # sozinha nao aparecia em lugar nenhum do painel (teste de 02/10).
-        notas = (contact.get("notes") or "").strip()
-        bloco = f"[{datetime.utcnow().strftime('%d/%m/%Y')}] {titulo}\n{descricao}"
-        database.update_contact(contact["id"], crm_status="agendamento",
-                                notes=f"{notas}\n\n{bloco}".strip())
         conv = database.get_or_create_conversation(user)
+        nome = next((n for n in (ficha.get("nome_completo"), ficha.get("nome"), contact.get("name"))
+                     if n and n != ficha_paciente.NAO_INFORMADO), user)
+        if prioridade:
+            nome = f"{nome} (PRIORIDADE - trauma)"
+        ag = database.criar_agendamento(contact["id"], conv["id"], user, nome, resumo, ficha)
         database.save_message(
             conversation_id=conv["id"], phone=user, direction="internal",
-            body=f"{titulo}\n\n{descricao}", sender="system", msg_type="system",
+            body=f"{titulo} - aguardando confirmacao na aba Agendamentos\n\n{resumo}",
+            sender="system", msg_type="system",
         )
+        events.emit("agendamento_atualizado", {"id": ag["id"] if ag else None, "status": "pendente"})
     except Exception as e:
-        print(f"[agendamento] WARN nao registrou tarefa de {user}: {e}")
+        print(f"[agendamento] ERRO ao registrar pedido de {user}: {e}")
     perform_transfer(user, reason=titulo, send_message=False)
 
 
@@ -2327,6 +2324,262 @@ def api_knowledge_delete_all():
     """Deleta todo o knowledge (chunks + metadados)."""
     count = knowledge_rag.delete_all()
     return jsonify({"ok": True, "deleted": count})
+
+# ── Agendamentos (abas Confirmação de Agendamento e Agenda) ──────────────────
+
+_DIAS_SEMANA = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+                "sexta-feira", "sábado", "domingo"]
+_DURACAO_PADRAO = 60
+
+
+def _duracao_padrao() -> int:
+    try:
+        return int(database.get_setting("agenda_duracao_padrao", str(_DURACAO_PADRAO)))
+    except ValueError:
+        return _DURACAO_PADRAO
+
+
+def _quando_por_extenso(inicio: str) -> str:
+    """'2026-10-08T09:00' -> 'quinta-feira, 08/10, às 09h00'."""
+    d = datetime.fromisoformat(inicio)
+    return f"{_DIAS_SEMANA[d.weekday()]}, {d.strftime('%d/%m')}, às {d.strftime('%Hh%M')}"
+
+
+def _avisar_paciente(ag: dict, texto: str) -> bool:
+    """Manda a mensagem ao paciente e registra no painel. False se nao saiu."""
+    res = send_text(ag["phone"], texto)
+    if not res.get("ok"):
+        print(f"[agenda] WARN aviso ao paciente {ag['phone']} nao saiu: {res.get('error')}")
+        return False
+    conv_id = ag.get("conversation_id") or database.get_or_create_conversation(ag["phone"])["id"]
+    database.save_message(conversation_id=conv_id, phone=ag["phone"], direction="out",
+                          body=texto, sender="agent", msg_type="text")
+    database.update_conversation(conv_id, last_message_at=database.agora_utc())
+    events.emit("message_sent", {"conversation_id": conv_id, "phone": ag["phone"], "body": texto})
+    return True
+
+
+def _sincronizar_google(ag: dict) -> str:
+    """Cria/atualiza o evento no Google, se conectado. Devolve o erro ("" = ok)."""
+    if not google_agenda.conectado():
+        return ""
+    try:
+        event_id = google_agenda.salvar_evento(ag)
+        if event_id != ag.get("google_event_id"):
+            database.atualizar_agendamento(ag["id"], google_event_id=event_id)
+        return ""
+    except Exception as e:
+        print(f"[google] WARN sincronizacao do agendamento {ag['id']}: {e}")
+        return str(e)
+
+
+def _horario_do_pedido(data: dict) -> tuple[str, int, str]:
+    """(inicio ISO local, duracao, erro) a partir de data/hora/duracao do painel."""
+    dia = str(data.get("data", "")).strip()
+    hora = str(data.get("hora", "")).strip()
+    try:
+        inicio = datetime.fromisoformat(f"{dia}T{hora}").strftime("%Y-%m-%dT%H:%M")
+    except ValueError:
+        return "", 0, "Informe a data e o horário."
+    try:
+        duracao = int(data.get("duracao_min") or _duracao_padrao())
+    except (TypeError, ValueError):
+        return "", 0, "Duração inválida."
+    if not 10 <= duracao <= 480:
+        return "", 0, "A duração deve ficar entre 10 minutos e 8 horas."
+    return inicio, duracao, ""
+
+
+@app.get("/api/agendamentos")
+@login_required
+def api_agendamentos_listar():
+    return jsonify(database.listar_agendamentos(
+        status=request.args.get("status", ""),
+        de=request.args.get("de", ""), ate=request.args.get("ate", ""),
+    ))
+
+
+@app.get("/api/agendamentos/pendentes/count")
+@login_required
+def api_agendamentos_pendentes_count():
+    return jsonify({"count": database.contar_agendamentos_pendentes()})
+
+
+@app.get("/api/agendamentos/<int:ag_id>")
+@login_required
+def api_agendamento_detalhe(ag_id):
+    ag = database.obter_agendamento(ag_id)
+    if not ag:
+        return jsonify({"error": "Agendamento não encontrado"}), 404
+    return jsonify(ag)
+
+
+def _salvar_horario(ag_id: int, remarcar: bool):
+    ag = database.obter_agendamento(ag_id)
+    if not ag:
+        return jsonify({"error": "Agendamento não encontrado"}), 404
+    if remarcar and ag["status"] != "confirmado":
+        return jsonify({"error": "Só agendamentos confirmados podem ser remarcados"}), 400
+    if not remarcar and ag["status"] != "pendente":
+        return jsonify({"error": "Este agendamento já não está pendente"}), 400
+    data = request.get_json(silent=True) or {}
+    inicio, duracao, erro = _horario_do_pedido(data)
+    if erro:
+        return jsonify({"error": erro}), 400
+    conflitos = database.conflitos_de_horario(inicio, duracao, ignorar_id=ag_id)
+    if conflitos and not data.get("forcar"):
+        return jsonify({"error": "conflito", "conflitos": conflitos}), 409
+
+    campos = {"inicio": inicio, "duracao_min": duracao,
+              "observacoes": str(data.get("observacoes", ag.get("observacoes") or "")).strip()[:1000]}
+    if not remarcar:
+        campos.update(status="confirmado", confirmado_em=database.agora_utc())
+    database.atualizar_agendamento(ag_id, **campos)
+    ag = database.obter_agendamento(ag_id)
+
+    erro_google = _sincronizar_google(ag)
+    avisado = False
+    if data.get("avisar", True):
+        quando = _quando_por_extenso(inicio)
+        texto = (f"Sua avaliação com o Dr. Fabrício foi remarcada para {quando}." if remarcar
+                 else f"Sua avaliação com o Dr. Fabrício está confirmada para {quando}.")
+        endereco = clinica.info_clinica("endereco")
+        if endereco:
+            texto += f"\n\nEndereço: {endereco}"
+        avisado = _avisar_paciente(ag, texto)
+    events.emit("agendamento_atualizado", {"id": ag_id, "status": ag["status"]})
+    return jsonify({"ok": True, "agendamento": database.obter_agendamento(ag_id),
+                    "avisado": avisado, "erro_google": erro_google})
+
+
+@app.post("/api/agendamentos/<int:ag_id>/confirmar")
+@login_required
+def api_agendamento_confirmar(ag_id):
+    return _salvar_horario(ag_id, remarcar=False)
+
+
+@app.put("/api/agendamentos/<int:ag_id>")
+@login_required
+def api_agendamento_remarcar(ag_id):
+    return _salvar_horario(ag_id, remarcar=True)
+
+
+@app.post("/api/agendamentos/<int:ag_id>/cancelar")
+@login_required
+def api_agendamento_cancelar(ag_id):
+    ag = database.obter_agendamento(ag_id)
+    if not ag:
+        return jsonify({"error": "Agendamento não encontrado"}), 404
+    if ag["status"] == "cancelado":
+        return jsonify({"ok": True})
+    data = request.get_json(silent=True) or {}
+    erro_google = ""
+    if ag.get("google_event_id") and google_agenda.conectado():
+        try:
+            google_agenda.apagar_evento(ag["google_event_id"])
+        except Exception as e:
+            erro_google = str(e)
+    database.atualizar_agendamento(ag_id, status="cancelado", google_event_id="")
+    avisado = False
+    if data.get("avisar") and ag["status"] == "confirmado" and ag.get("inicio"):
+        avisado = _avisar_paciente(ag, (
+            f"Sua avaliação de {_quando_por_extenso(ag['inicio'])} foi cancelada. "
+            "Se quiser remarcar, é só responder por aqui."))
+    events.emit("agendamento_atualizado", {"id": ag_id, "status": "cancelado"})
+    return jsonify({"ok": True, "avisado": avisado, "erro_google": erro_google})
+
+
+@app.get("/api/settings/agenda")
+@login_required
+def api_get_agenda_settings():
+    return jsonify({"duracao_padrao": _duracao_padrao(), "google": google_agenda.status()})
+
+
+@app.put("/api/settings/agenda")
+@login_required
+def api_set_agenda_settings():
+    data = request.get_json(silent=True) or {}
+    try:
+        duracao = int(data.get("duracao_padrao", _DURACAO_PADRAO))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Duração inválida"}), 400
+    if not 10 <= duracao <= 480:
+        return jsonify({"error": "A duração deve ficar entre 10 minutos e 8 horas"}), 400
+    database.set_setting("agenda_duracao_padrao", str(duracao))
+    return jsonify({"ok": True, "duracao_padrao": duracao})
+
+
+# ── Google Calendar (opcional) ───────────────────────────────────────────────
+
+def _url_base() -> str:
+    # Atras do proxy do Render o Flask ve http; o Google exige o https real.
+    proto = request.headers.get("X-Forwarded-Proto", request.scheme).split(",")[0].strip()
+    return f"{proto}://{request.host}/"
+
+
+@app.get("/api/google/status")
+@login_required
+def api_google_status():
+    return jsonify(google_agenda.status())
+
+
+@app.get("/api/google/conectar")
+@login_required
+def api_google_conectar():
+    if not google_agenda.configurado():
+        return redirect("/panel?google=nao_configurado")
+    import secrets
+    session["google_state"] = secrets.token_urlsafe(24)
+    return redirect(google_agenda.url_autorizacao(session["google_state"],
+                                                  google_agenda.redirect_uri(_url_base())))
+
+
+@app.get("/api/google/callback")
+@login_required
+def api_google_callback():
+    state = request.args.get("state", "")
+    if not state or state != session.pop("google_state", None):
+        return redirect("/panel?google=erro")
+    if request.args.get("error") or not request.args.get("code"):
+        return redirect("/panel?google=cancelado")
+    try:
+        google_agenda.trocar_codigo(request.args["code"], google_agenda.redirect_uri(_url_base()))
+    except Exception as e:
+        print(f"[google] ERRO na conexao: {e}")
+        return redirect("/panel?google=erro")
+    _sincronizar_pendentes_google()
+    return redirect("/panel?google=conectado")
+
+
+def _sincronizar_pendentes_google() -> dict:
+    """Leva para o Google os confirmados de hoje em diante ainda sem evento."""
+    hoje = datetime.utcnow().strftime("%Y-%m-%d")
+    enviados, erros = 0, []
+    for ag in database.listar_agendamentos(status="confirmado", de=hoje):
+        if ag.get("google_event_id"):
+            continue
+        erro = _sincronizar_google(ag)
+        if erro:
+            erros.append(erro)
+        else:
+            enviados += 1
+    return {"enviados": enviados, "erros": erros[:3]}
+
+
+@app.post("/api/google/sincronizar")
+@login_required
+def api_google_sincronizar():
+    if not google_agenda.conectado():
+        return jsonify({"error": "Google Calendar não conectado"}), 400
+    return jsonify({"ok": True, **_sincronizar_pendentes_google()})
+
+
+@app.post("/api/google/desconectar")
+@login_required
+def api_google_desconectar():
+    google_agenda.desconectar()
+    return jsonify({"ok": True})
+
 
 # ── WhatsApp Cloud API (Meta) ────────────────────────────────────────────────
 

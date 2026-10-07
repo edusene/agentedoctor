@@ -49,20 +49,26 @@ ROTULOS = {
 }
 
 PERGUNTAS = {
-    "nome": "Com quem eu falo? Qual é o seu nome?",
-    # Seção 16, segundo parágrafo.
-    "queixa": ("Para eu te orientar melhor, me conta qual é a sua principal queixa "
-               "ou o que você gostaria de tratar."),
+    # Textos curtos de proposito: o Dr. Fabricio pediu menos texto (07/10).
+    "nome": "Qual é o seu nome?",
+    "queixa": "Qual é a sua principal queixa ou o que você gostaria de tratar?",
     "exames": "Você tem exames (radiografia, tomografia, laudo) ou algum encaminhamento?",
     "nome_completo": "Qual é o seu nome completo?",
     "nascimento": "Qual é a sua data de nascimento?",
     "cpf": "Qual é o seu CPF?",
     "rg": "Qual é o seu RG?",
     "endereco": "Qual é o seu endereço completo (rua, número, bairro e cidade)?",
-    "disponibilidade": "Quais dias e horários ficam melhores para você vir à avaliação?",
-    "tipo_consulta": "Esta seria a sua primeira consulta com o Dr. Fabrício ou é um retorno?",
+    "disponibilidade": "Quais dias e horários ficam melhores para você?",
+    "tipo_consulta": "É a sua primeira consulta ou um retorno?",
     "saude": ("Por último: você tem alguma condição de saúde, alergia ou usa algum "
-              "medicamento contínuo? Se não tiver, é só responder \"não\"."),
+              "medicamento contínuo?"),
+}
+
+# Quando a pergunta precisa ser repetida (o paciente respondeu outra coisa).
+PERGUNTAS_CURTAS = {
+    "queixa": "Qual é a sua principal queixa?",
+    "disponibilidade": "Quais dias e horários são melhores?",
+    "saude": "Você tem alguma condição de saúde, alergia ou usa medicamento contínuo?",
 }
 
 PERGUNTA_CONFIRMACAO = "Está tudo certo? Posso encaminhar para a equipe confirmar o seu horário?"
@@ -169,10 +175,12 @@ def _pergunta_cadastro(ficha: dict) -> str:
     return f"Para completar o seu cadastro, ainda preciso de:\n{lista}"
 
 
-def pergunta_do_campo(ficha: dict, campo: str) -> str:
+def pergunta_do_campo(ficha: dict, campo: str, repetida: bool = False) -> str:
     """Pergunta do campo. Com area identificada, a da area tem preferencia."""
     if campo in CADASTRO:
         return _pergunta_cadastro(ficha)
+    if repetida and campo in PERGUNTAS_CURTAS:
+        return PERGUNTAS_CURTAS[campo]
     chave = _PERGUNTA_DA_AREA.get(campo)
     if chave:
         da_area = clinica.AREAS.get(ficha.get("area"), {}).get(chave, "")
@@ -503,7 +511,11 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         return True
 
     if campo in CADASTRO:
-        if re.search(r"\b(?:prefiro nao|nao quero (?:informar|passar|dizer)|nao tenho)\b", t):
+        # Recusa vale para qualquer campo; "nao tenho" so para documento (RG,
+        # CPF) - para o nome completo ele nao quer dizer nada.
+        recusa = re.search(r"\b(?:prefiro nao|nao quero (?:informar|passar|dizer))\b", t)
+        sem_documento = campo in ("rg", "cpf") and re.search(r"\bnao tenho\b", t)
+        if recusa or sem_documento:
             ficha[campo] = NAO_INFORMADO
             return True
         achados = extrair_cadastro(bruto, campo_esperado=campo)
@@ -672,6 +684,11 @@ def _data(m: re.Match) -> str:
 
 
 def _eh_nome_completo(trecho: str) -> bool:
+    # "nao tenho", "sim", "nao sei" sao resposta, nao nome.
+    if clinica.e_nao(trecho) or clinica.e_sim(trecho) or clinica.e_nao_sabe(trecho):
+        return False
+    if any(clinica.normalizar(p) in (_PARADAS_NOME - _PARTICULAS) for p in trecho.split()):
+        return False
     palavras = [p for p in trecho.split() if p.lower() not in _PARTICULAS]
     return (len(palavras) >= 2 and bool(re.fullmatch(rf"[{_LETRAS}\s'-]+", trecho))
             and not _RX_ENDERECO.search(trecho) and not clinica.classificar_areas(trecho))

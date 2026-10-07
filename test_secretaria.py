@@ -305,6 +305,13 @@ class Fluxo(unittest.TestCase):
         self.assertIn(fp.PERGUNTAS["endereco"], saidas[6][2])
         self.assertEqual(ficha["ultima_pergunta"], "endereco")
 
+    def test_nao_tenho_no_cadastro_nao_apaga_o_nome(self):
+        ficha, _ = conversa(self.CONVERSA[:5] + ["não tenho"])
+        self.assertEqual(ficha["nome_completo"], "")
+        f = fp.nova("1")
+        self.assertTrue(fp.capturar_resposta(f, "rg", "não tenho RG"))
+        self.assertEqual(f["rg"], fp.NAO_INFORMADO)
+
     def test_cpf_errado_e_avisado(self):
         ficha, saidas = conversa(self.CONVERSA[:5] + ["Maria Silva Souza, 12/03/1990, CPF 123.456.789-00"])
         self.assertEqual(ficha["cpf"], "")
@@ -336,7 +343,36 @@ class Fluxo(unittest.TestCase):
         for cumprimento in ["Boa noite", "Olá, boa noite", "oi, tudo bem?"]:
             with self.subTest(cumprimento=cumprimento):
                 ficha, saidas = conversa(["Oi", cumprimento])
-                self.assertTrue(saidas[1][2].startswith("Boa tarde! Com quem eu falo?"))
+                self.assertTrue(saidas[1][2].startswith("Boa tarde! Qual é o seu nome?"))
+
+    def test_menos_texto(self):
+        """Pedidos do teste de 07/10: sem 'Se nao tiver, e so responder nao'."""
+        _, saidas = conversa(self.CONVERSA)
+        tudo = " ".join(t for _, _, t in saidas)
+        self.assertNotIn("é só responder", tudo)
+        self.assertNotIn("Com quem eu falo", tudo)
+        self.assertNotIn("Para eu te orientar melhor", tudo)
+
+    def test_pergunta_repetida_e_curta(self):
+        # Depois do #reset o nome ja foi perguntado; "quero agendar" nao responde.
+        ficha = fp.nova("1")
+        ficha["saudacao_feita"] = True
+        fp.marcar_pergunta(ficha, "nome")
+        d = secretaria.decidir(ficha, "Gostaria de agendar uma consulta com o Doutor Fabrício", TARDE)
+        self.assertEqual(secretaria.montar(d)[0], "Claro, vamos agendar a sua avaliação! Qual é o seu nome?")
+        ficha, saidas = conversa(["Oi", "Ana", "kkkk"])
+        self.assertIn(fp.PERGUNTAS_CURTAS["queixa"], saidas[2][2])
+
+    def test_orientacoes_conforme_a_ficha(self):
+        # Sem exames, sem indicacao e sem medicamento: nada de "leve seus exames".
+        ficha, saidas = conversa(self.CONVERSA[:4] + ["não tenho"] + self.CONVERSA[5:])
+        self.assertNotIn("leve seus exames", saidas[-1][2])
+        self.assertNotIn("Para a avaliação, leve", saidas[-1][2])
+        # Com exame e com medicamento: as duas orientacoes.
+        ficha, saidas = conversa(self.CONVERSA[:-2] + ["uso losartana", "sim"])
+        self.assertIn("Para a avaliação, leve seus exames e a lista dos medicamentos que você usa.",
+                      saidas[-1][2])
+        self.assertEqual(clinica.orientacoes_pre_consulta({"exames": "Não possui", "saude": "Nada relatado"}), "")
 
     def test_confirmacao_vem_antes_do_resumo(self):
         _, saidas = conversa(self.CONVERSA)
@@ -397,7 +433,8 @@ class Fluxo(unittest.TestCase):
         ficha, saidas = conversa(["Oi", "Ana", "Quanto custa?"])
         texto = saidas[2][2]
         self.assertIn(clinica.RESPOSTA_PRECO, texto)
-        self.assertIn(fp.PERGUNTAS["queixa"], texto)
+        # A queixa ja tinha sido perguntada: volta na versao curta.
+        self.assertIn(fp.PERGUNTAS_CURTAS["queixa"], texto)
         self.assertNotIn("R$", texto)
 
     def test_correcao_no_resumo(self):

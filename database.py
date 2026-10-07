@@ -143,6 +143,11 @@ def init_db() -> None:
         db.executescript(CRM_SCHEMA)
         print("[db] tabelas CRM criadas")
 
+    # Agendamentos (abas Confirmação de Agendamento e Agenda do painel)
+    if "agendamentos" not in _get_tables():
+        db.executescript(AGENDAMENTOS_SCHEMA)
+        print("[db] tabela agendamentos criada")
+
     _ensure_indexes()
 
 
@@ -213,6 +218,29 @@ CREATE TABLE IF NOT EXISTS knowledge_files (
     created_at TEXT DEFAULT NOW(),
     updated_at TEXT DEFAULT NOW()
 );
+"""
+
+AGENDAMENTOS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS agendamentos (
+    id SERIAL PRIMARY KEY,
+    contact_id INTEGER REFERENCES contacts(id),
+    conversation_id INTEGER REFERENCES conversations(id),
+    phone TEXT DEFAULT '',
+    nome TEXT DEFAULT '',
+    resumo TEXT DEFAULT '',
+    ficha TEXT DEFAULT '{}',
+    status TEXT DEFAULT 'pendente',
+    inicio TEXT DEFAULT '',
+    duracao_min INTEGER DEFAULT 60,
+    observacoes TEXT DEFAULT '',
+    google_event_id TEXT DEFAULT '',
+    confirmado_em TEXT DEFAULT '',
+    created_at TEXT DEFAULT NOW(),
+    updated_at TEXT DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_agendamentos_status ON agendamentos(status);
+CREATE INDEX IF NOT EXISTS idx_agendamentos_inicio ON agendamentos(inicio);
+CREATE INDEX IF NOT EXISTS idx_agendamentos_contact ON agendamentos(contact_id)
 """
 
 CRM_SCHEMA = """
@@ -476,7 +504,7 @@ def delete_contact(contact_id: int) -> None:
     convs = db.fetch_all("SELECT id FROM conversations WHERE contact_id=?", (contact_id,))
     for conv in convs:
         cid = conv["id"]
-        for tbl in ("crm_follow_ups", "crm_logs"):
+        for tbl in ("crm_follow_ups", "crm_logs", "agendamentos"):
             try:
                 db.execute(f"DELETE FROM {tbl} WHERE conversation_id=?", (cid,))
             except Exception:
@@ -484,7 +512,7 @@ def delete_contact(contact_id: int) -> None:
         db.execute("DELETE FROM conversation_tags WHERE conversation_id=?", (cid,))
         db.execute("DELETE FROM messages WHERE conversation_id=?", (cid,))
     db.execute("DELETE FROM conversations WHERE contact_id=?", (contact_id,))
-    for tbl in ("contact_tags", "tasks", "crm_follow_ups", "crm_logs"):
+    for tbl in ("contact_tags", "tasks", "crm_follow_ups", "crm_logs", "agendamentos"):
         try:
             db.execute(f"DELETE FROM {tbl} WHERE contact_id=?", (contact_id,))
         except Exception:
@@ -676,7 +704,7 @@ def clear_conversation(conv_id: int) -> None:
 
 def delete_conversation(conv_id: int) -> None:
     """Remove todas as dependências FK e a própria conversa."""
-    for tbl in ("crm_follow_ups", "crm_logs"):
+    for tbl in ("crm_follow_ups", "crm_logs", "agendamentos"):
         try:
             db.execute(f"DELETE FROM {tbl} WHERE conversation_id=?", (conv_id,))
         except Exception:
@@ -1325,6 +1353,104 @@ def get_recent_messages(phone: str, limit: int = 20) -> list[dict]:
         role = "user" if r["direction"] == "in" else "assistant"
         messages.append({"role": role, "parts": [{"text": r["body"]}]})
     return messages
+
+
+# ── Agendamentos ─────────────────────────────────────────────────────────────
+# Pedido confirmado pelo paciente no WhatsApp entra como 'pendente' (aba
+# Confirmação de Agendamento). A equipe escolhe dia e hora: vira 'confirmado'
+# e aparece na Agenda. 'cancelado' sai das duas. `inicio` e hora LOCAL do
+# consultorio em ISO ("2026-10-08T09:00"), que e o que a equipe ve e digita.
+
+_CAMPOS_AGENDAMENTO = ("status", "inicio", "duracao_min", "observacoes", "google_event_id",
+                       "confirmado_em", "nome", "resumo")
+
+
+def criar_agendamento(contact_id: int, conversation_id: int, phone: str, nome: str,
+                      resumo: str, ficha: dict) -> dict:
+    now = agora_utc()
+    ag_id = db.execute_returning(
+        "INSERT INTO agendamentos (contact_id, conversation_id, phone, nome, resumo, ficha, "
+        "status, created_at, updated_at) VALUES (?,?,?,?,?,?,'pendente',?,?)",
+        (contact_id, conversation_id, phone, nome, resumo,
+         json.dumps(ficha, ensure_ascii=False, default=str), now, now),
+    )
+    return obter_agendamento(ag_id)
+
+
+def _agendamento_com_ficha(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    item = dict(row)
+    try:
+        item["ficha"] = json.loads(item.get("ficha") or "{}")
+    except (TypeError, ValueError):
+        item["ficha"] = {}
+    return item
+
+
+def obter_agendamento(ag_id: int) -> dict | None:
+    return _agendamento_com_ficha(db.fetch_one("SELECT * FROM agendamentos WHERE id=?", (ag_id,)))
+
+
+def listar_agendamentos(status: str = "", de: str = "", ate: str = "") -> list[dict]:
+    """Pendentes por ordem de chegada; confirmados por data da consulta."""
+    where, params = [], []
+    if status:
+        where.append("status=?")
+        params.append(status)
+    if de:
+        where.append("inicio >= ?")
+        params.append(de)
+    if ate:
+        where.append("inicio < ?")
+        params.append(ate)
+    sql = "SELECT * FROM agendamentos"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at ASC" if status == "pendente" else " ORDER BY inicio ASC, id ASC"
+    return [_agendamento_com_ficha(r) for r in db.fetch_all(sql + " LIMIT 1000", tuple(params))]
+
+
+def atualizar_agendamento(ag_id: int, **campos: Any) -> None:
+    sets, vals = [], []
+    for k, v in campos.items():
+        if k in _CAMPOS_AGENDAMENTO:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if sets:
+        sets.append("updated_at=?")
+        vals.extend([agora_utc(), ag_id])
+        db.execute(f"UPDATE agendamentos SET {','.join(sets)} WHERE id=?", tuple(vals))
+
+
+def contar_agendamentos_pendentes() -> int:
+    row = db.fetch_one("SELECT COUNT(*) AS n FROM agendamentos WHERE status='pendente'")
+    return int((row or {}).get("n") or 0)
+
+
+def conflitos_de_horario(inicio: str, duracao_min: int, ignorar_id: int = 0) -> list[dict]:
+    """Agendamentos confirmados que se sobrepoem ao horario pedido."""
+    try:
+        ini = datetime.fromisoformat(inicio)
+    except ValueError:
+        return []
+    fim = ini + timedelta(minutes=duracao_min)
+    dia = ini.strftime("%Y-%m-%d")
+    candidatos = db.fetch_all(
+        "SELECT id, nome, inicio, duracao_min FROM agendamentos "
+        "WHERE status='confirmado' AND id<>? AND inicio >= ? AND inicio < ?",
+        (ignorar_id, dia, (ini + timedelta(days=1)).strftime("%Y-%m-%d")),
+    )
+    saida = []
+    for c in candidatos:
+        try:
+            c_ini = datetime.fromisoformat(c["inicio"])
+        except (TypeError, ValueError):
+            continue
+        c_fim = c_ini + timedelta(minutes=int(c.get("duracao_min") or 60))
+        if c_ini < fim and ini < c_fim:
+            saida.append(dict(c))
+    return saida
 
 
 # ── CRM: Automações ─────────────────────────────────────────────────────────
