@@ -4276,16 +4276,39 @@ select option {
 
 .agenda-controles { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .agenda-titulo { font-weight: 700; font-size: 16px; margin: 0 6px; min-width: 150px; }
-.agenda-modo { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+/* Seletor Mes/Semana com indicador que desliza */
+.agenda-modo {
+    position: relative;
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-input);
+}
+.agenda-modo::before {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0; left: 0;
+    width: 50%;
+    background: var(--accent);
+    border-radius: calc(var(--radius-sm) - 1px);
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.agenda-modo.semana::before { transform: translateX(100%); }
 .agenda-modo button {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    min-width: 76px;
     background: transparent;
     border: none;
     color: var(--text-muted);
     padding: 6px 12px;
     cursor: pointer;
     font-size: 12.5px;
+    transition: color 0.2s ease;
 }
-.agenda-modo button.active { background: var(--accent); color: #fff; }
+.agenda-modo button.active { color: #fff; }
 .agenda-google {
     display: flex;
     align-items: center;
@@ -4357,3 +4380,57 @@ select option {
 .agenda-vazia { padding: 12px 16px; margin: 0; }
 .agenda-rodape { margin-top: 12px; font-size: 13px; }
 .agenda-rodape select { margin-left: 8px; }
+
+/* ── Movimento: navegacao da agenda e lista de agendamentos ──────────────── */
+.agenda-grade { position: relative; }
+.agenda-corpo { will-change: transform, opacity; }
+.agenda-corpo.anim-prox { animation: agendaEntraDireita 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
+.agenda-corpo.anim-ant  { animation: agendaEntraEsquerda 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
+.agenda-corpo.anim-modo { animation: agendaEntraZoom 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes agendaEntraDireita { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes agendaEntraEsquerda { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
+@keyframes agendaEntraZoom { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
+
+/* Barra fina de carregamento no topo do calendario (nao esconde a grade) */
+.agenda-grade::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0;
+    height: 2px;
+    width: 35%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0;
+    z-index: 2;
+    pointer-events: none;
+}
+.agenda-grade.carregando::before { opacity: 1; animation: agendaCarregando 0.9s ease-in-out infinite; }
+@keyframes agendaCarregando { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+
+.agenda-dia { transition: background 0.15s ease; }
+.agenda-dia:hover { background: rgba(99, 102, 241, 0.04); }
+.agenda-evento {
+    animation: agendaEventoEntra 0.28s ease both;
+    animation-delay: calc(var(--i, 0) * 30ms);
+    transition: background 0.15s ease, transform 0.12s ease;
+}
+.agenda-evento:active { transform: scale(0.97); }
+@keyframes agendaEventoEntra { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.agenda-controles .btn-sm { transition: background 0.15s ease, transform 0.12s ease; }
+.agenda-controles .btn-sm:active { transform: scale(0.94); }
+
+.ag-entra {
+    animation: agCardEntra 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+}
+@keyframes agCardEntra { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.ag-card { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+.ag-card:hover { border-color: rgba(99, 102, 241, 0.35); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18); }
+.ag-card.ag-sai { animation: agCardSai 0.26s ease forwards; pointer-events: none; }
+@keyframes agCardSai { to { opacity: 0; transform: translateX(24px) scale(0.98); } }
+
+@media (prefers-reduced-motion: reduce) {
+    .agenda-corpo, .agenda-evento, .ag-entra, .ag-card.ag-sai { animation: none !important; }
+    .agenda-modo::before, .agenda-dia, .ag-card { transition: none !important; }
+    .agenda-grade.carregando::before { animation: none; opacity: 0.6; width: 100%; }
+}
