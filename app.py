@@ -1124,8 +1124,6 @@ garantir_base_de_conhecimento()
 # Inicia o scheduler de follow-ups CRM
 try:
     crm_scheduler.start_scheduler()
-    crm_scheduler.scheduler.add_job(_vigiar_google, "interval", seconds=20, id="vigiar_google",
-                                    max_instances=1, coalesce=True)
     # A Agenda ja abre pronta depois de um deploy ou de o servidor acordar.
     if google_agenda.conectado():
         google_agenda.atualizar_janela_em_segundo_plano()
@@ -1386,6 +1384,8 @@ def panel_page():
 @login_required
 def sse_stream():
     import queue as _queue
+    if google_agenda.conectado():
+        _garantir_vigia()
     def stream():
         q = events.subscribe()
         try:
@@ -2442,6 +2442,12 @@ def api_agenda():
     ags = database.listar_agendamentos(status="confirmado", de=de, ate=ate)
     google, erro = [], ""
     if google_agenda.conectado():
+        _garantir_vigia()
+        if google_agenda.idade_da_janela() > 20:
+            # Sob demanda, independente do vigia: a tela recebe a copia atual
+            # agora e, se o Google tiver mudado, o aviso chega em seguida.
+            google_agenda.atualizar_janela_em_segundo_plano(
+                lambda mudou: _avisar_mudanca_no_google("tela pediu") if mudou else None)
         try:
             google = google_agenda.eventos_do_periodo(de, ate, database.ids_eventos_google())
         except Exception as e:
@@ -2571,6 +2577,8 @@ def api_get_agenda_settings():
     base = _url_base()
     if base.startswith("https://") and database.get_setting("google_base_url", "") != base:
         database.set_setting("google_base_url", base)
+    if google_agenda.conectado():
+        _garantir_vigia()
     return jsonify({"duracao_padrao": _duracao_padrao(), "google": google_agenda.status()})
 
 
@@ -2653,6 +2661,40 @@ def _avisar_mudanca_no_google(origem: str) -> None:
     google_agenda.limpar_cache()
     print(f"[google] agenda mudou ({origem}); avisando o painel")
     events.emit("google_agenda_mudou", {})
+
+
+_vigia = {"thread": None, "pid": 0}
+_vigia_lock = threading.Lock()
+
+
+def _garantir_vigia() -> None:
+    """Liga o vigia do Google NESTE processo, se ainda nao estiver rodando.
+
+    Era um job do agendador iniciado no import, e em producao nunca rodou: o
+    servidor sobe o app num processo e atende em outro (fork), e thread nao
+    atravessa fork. Chamado pelas rotas do painel, liga onde de fato atende.
+    """
+    pid = os.getpid()
+    t = _vigia["thread"]
+    if t is not None and t.is_alive() and _vigia["pid"] == pid:
+        return
+    with _vigia_lock:
+        t = _vigia["thread"]
+        if t is not None and t.is_alive() and _vigia["pid"] == pid:
+            return
+
+        def _laco():
+            while True:
+                try:
+                    _vigiar_google()
+                except Exception as e:
+                    print(f"[google] WARN vigia: {e}")
+                time.sleep(20)
+
+        t = threading.Thread(target=_laco, name="vigia-google", daemon=True)
+        _vigia.update(thread=t, pid=pid)
+        t.start()
+        print(f"[google] vigia ligado (pid {pid})")
 
 
 def _vigiar_google() -> None:

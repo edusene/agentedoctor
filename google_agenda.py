@@ -503,4 +503,5 @@ def diagnostico() -> dict:
         "avisos_erro": _DIAG["avisos_erro"],
         "leitura_erro": _DIAG["leitura_erro"],
         "idade_seg": None if idade == float("inf") else int(idade),
+        "checagem_seg": int(time.time() - _DIAG["checagem_em"]) if _DIAG["checagem_em"] else None,
     }
