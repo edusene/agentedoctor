@@ -3366,7 +3366,12 @@ function agendaUrl(ini, fim) {
 
 // Configuracao e status do Google: uma vez ao abrir a aba, nao a cada clique.
 async function loadAgendaConfig() {
+    const box = document.getElementById('agenda-google');
+    if (box && !box.dataset.carregado) {
+        box.innerHTML = '<span class="skeleton agenda-google-esqueleto"></span>';
+    }
     const cfg = await api('/api/settings/agenda');
+    if (box) box.dataset.carregado = '1';
     if (!cfg) return;
     agendaDuracaoPadrao = cfg.duracao_padrao || 60;
     const sel = document.getElementById('agenda-duracao-padrao');
@@ -3473,7 +3478,10 @@ function renderAgenda(dados, ini, fim, animacao, carregando) {
     // Cabecalho fixo; so o corpo entra animado (desliza no ‹ ›, zoom no modo).
     if (!grade.querySelector('.agenda-cabecalho')) {
         grade.innerHTML = `<div class="agenda-cabecalho">${DIAS_CURTOS.map(d => `<div>${d}</div>`).join('')}</div>
-            <div class="agenda-corpo"></div>`;
+            <div class="agenda-corpo"></div>
+            <div class="agenda-aviso-carregando" role="status" aria-live="polite">
+                <span class="agenda-spinner"></span> Carregando agenda…
+            </div>`;
     }
     const corpo = grade.querySelector('.agenda-corpo');
     corpo.innerHTML = `
@@ -3483,7 +3491,7 @@ function renderAgenda(dados, ini, fim, animacao, carregando) {
                 const fora = !semana && d.getMonth() !== agendaRef.getMonth();
                 return `<div class="agenda-dia ${fora ? 'fora' : ''} ${k === hoje ? 'hoje' : ''}">
                     <div class="agenda-num">${semana ? `${DIAS_CURTOS[d.getDay()]} ` : ''}${d.getDate()}</div>
-                    ${(porDia[k] || []).map(chip).join('')}
+                    ${carregando ? agendaEsqueletos(d, semana) : (porDia[k] || []).map(chip).join('')}
                 </div>`;
             }).join('')}
         </div>
@@ -3493,6 +3501,14 @@ function renderAgenda(dados, ini, fim, animacao, carregando) {
         void corpo.offsetWidth;  // reinicia a animacao
         corpo.classList.add(`anim-${animacao}`);
     }
+}
+
+// Blocos com brilho no lugar dos compromissos enquanto a agenda chega. A
+// distribuicao e fixa por dia (nao sorteada): trocar de mes nao "pula".
+function agendaEsqueletos(d, semana) {
+    const n = semana ? 1 + (d.getDate() * 7) % 3 : ((d.getDate() * 7 + d.getMonth()) % 5 === 0 ? 2 : (d.getDate() * 3) % 4 === 0 ? 1 : 0);
+    return Array.from({ length: n }, (_, i) =>
+        `<span class="agenda-esqueleto skeleton" style="width:${70 + ((d.getDate() + i * 13) % 25)}%"></span>`).join('');
 }
 
 function detalheEventoGoogle(id) {
@@ -3570,7 +3586,11 @@ function statusAtualizacaoGoogle(a) {
 }
 
 async function sincronizarGoogle() {
-    const r = await api('/api/google/sincronizar', { method: 'POST' });
+    const botao = typeof event !== 'undefined' && event ? event.currentTarget : null;
+    const rotulo = botao ? botao.textContent : '';
+    if (botao) { botao.disabled = true; botao.classList.add('trabalhando'); botao.textContent = 'Sincronizando…'; }
+    const r = await api('/api/google/sincronizar', { method: 'POST' })
+        .finally(() => { if (botao) { botao.disabled = false; botao.classList.remove('trabalhando'); botao.textContent = rotulo; } });
     if (!r || r.error) { toast(friendlyError(r?.error || 'Erro ao sincronizar'), 'error'); return; }
     toast(r.erros && r.erros.length ? `Sincronizado com falhas: ${r.erros[0]}` : `Sincronizado (${r.enviados} novo(s))`,
           r.erros && r.erros.length ? 'error' : 'success');
