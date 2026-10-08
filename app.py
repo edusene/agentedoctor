@@ -1115,6 +1115,8 @@ garantir_base_de_conhecimento()
 # Inicia o scheduler de follow-ups CRM
 try:
     crm_scheduler.start_scheduler()
+    crm_scheduler.scheduler.add_job(_vigiar_google, "interval", seconds=30, id="vigiar_google",
+                                    max_instances=1, coalesce=True)
 except Exception as e:
     print(f"[crm] WARN: scheduler nao iniciado: {e}")
 
@@ -2591,7 +2593,47 @@ def api_google_callback():
         print(f"[google] ERRO na conexao: {e}")
         return redirect("/panel?google=erro")
     _sincronizar_pendentes_google()
+    try:
+        google_agenda.iniciar_avisos(_url_base())
+    except Exception as e:
+        # Sem avisos a agenda continua certa: a checagem curta cobre.
+        print(f"[google] WARN avisos nao ligados: {e}")
     return redirect("/panel?google=conectado")
+
+
+@app.post("/api/google/notificacao")
+def api_google_notificacao():
+    """O Google avisa que a agenda mudou. Publica: quem vale e o token do canal."""
+    if not google_agenda.aviso_valido(request.headers.get("X-Goog-Channel-ID", ""),
+                                      request.headers.get("X-Goog-Channel-Token", "")):
+        return "", 404
+    if request.headers.get("X-Goog-Resource-State") != "sync":   # "sync" = canal aberto
+        _avisar_mudanca_no_google("aviso do Google")
+    return "", 200
+
+
+def _avisar_mudanca_no_google(origem: str) -> None:
+    google_agenda.limpar_cache()
+    print(f"[google] agenda mudou ({origem}); avisando o painel")
+    events.emit("google_agenda_mudou", {})
+
+
+def _vigiar_google() -> None:
+    """A cada 30 s: renova o canal de avisos e, com o painel aberto, confere se
+    algo mudou no Google - rede de segurança para aviso que se perdeu."""
+    if not google_agenda.conectado():
+        return
+    try:
+        google_agenda.renovar_avisos_se_preciso()
+    except Exception as e:
+        print(f"[google] WARN renovacao dos avisos: {e}")
+    if not events.tem_ouvintes():
+        return
+    try:
+        if google_agenda.houve_mudanca():
+            _avisar_mudanca_no_google("checagem")
+    except Exception as e:
+        print(f"[google] WARN checagem de mudancas: {e}")
 
 
 def _sincronizar_pendentes_google() -> dict:

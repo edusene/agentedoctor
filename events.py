@@ -27,6 +27,12 @@ def unsubscribe(q: queue.Queue) -> None:
             _subscribers.remove(q)
 
 
+def tem_ouvintes() -> bool:
+    """Algum painel aberto agora (conexão SSE ativa)?"""
+    with _lock:
+        return bool(_subscribers)
+
+
 def emit(event: str, data: Any) -> None:
     """Envia um evento para todos os subscribers conectados."""
     payload = json.dumps({"event": event, "data": data}, default=str, ensure_ascii=False)

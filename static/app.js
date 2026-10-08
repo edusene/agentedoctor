@@ -3016,6 +3016,9 @@ function connectSSE() {
                 }
             }
             if (currentView === 'dashboard') debouncedLoadDashboard();
+        } else if (event === 'google_agenda_mudou') {
+            // Alguem mexeu direto no Google Agenda: a grade aberta se atualiza.
+            agendaAtualizarEmSegundoPlano();
         } else if (event === 'agendamento_atualizado') {
             updateAgendamentosBadge();
             if (currentView === 'agendamentos') loadAgendamentosPendentes();

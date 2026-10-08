@@ -5,7 +5,8 @@ Sem conexão, a agenda funciona só no painel: nada aqui é obrigatório. Com
 conexão, cada agendamento confirmado vira um evento no calendário do
 consultório, e reagendar/cancelar no painel atualiza/apaga o evento. No
 sentido contrário, o que for marcado direto no Google aparece na Agenda do
-painel (só leitura) e conta no alerta de conflito de horário.
+painel (só leitura) e conta no alerta de conflito de horário. O Google avisa o
+painel quando a agenda muda (push), e a tela se atualiza sozinha.
 
 Conexão por OAuth 2.0 (fluxo web), só com `requests` — sem dependência nova:
 1. No Google Cloud Console, crie um "ID do cliente OAuth" do tipo "Aplicativo
@@ -103,6 +104,7 @@ def trocar_codigo(code: str, redirect: str) -> None:
 
 
 def desconectar() -> None:
+    parar_avisos()
     token = database.get_setting("google_refresh_token", "")
     if token:
         try:
@@ -305,3 +307,101 @@ def conflitos(inicio: str, duracao_min: int, ignorar: set | None = None) -> list
             saida.append({"id": 0, "nome": f"{e['titulo']} (Google Agenda)",
                           "inicio": e["inicio"], "duracao_min": e["duracao_min"]})
     return saida
+
+
+
+# ── Avisos do Google (push): mudança na agenda aparece no painel na hora ─────
+# O Google chama POST /api/google/notificacao quando algo muda no calendário.
+# O canal vale até 7 dias e é renovado pelo agendador antes de vencer. Se um
+# aviso se perder, houve_mudanca() é a rede de segurança (checagem curta).
+_CANAL_TTL_SEG = 7 * 24 * 3600
+_RENOVAR_ANTES_SEG = 24 * 3600
+
+
+def base_publica(host_url: str = "") -> str:
+    """https://dominio/ do painel. O Render informa em RENDER_EXTERNAL_URL."""
+    base = (_cfg("GOOGLE_WEBHOOK_BASE") or _cfg("RENDER_EXTERNAL_URL")
+            or database.get_setting("google_base_url", "") or host_url)
+    return base.rstrip("/") + "/" if base else ""
+
+
+def iniciar_avisos(host_url: str = "") -> bool:
+    """Abre o canal de avisos. False (sem erro) quando não há endereço https."""
+    import secrets
+    import uuid
+    base = base_publica(host_url)
+    if not base.startswith("https://"):
+        print(f"[google] avisos desligados: o Google so avisa endereco https ({base or 'sem endereco'})")
+        return False
+    if host_url.startswith("https://"):
+        database.set_setting("google_base_url", host_url.rstrip("/") + "/")
+    parar_avisos()
+    token = secrets.token_urlsafe(24)
+    r = requests.post(f"{_API}/calendars/{_calendario()}/events/watch", json={
+        "id": str(uuid.uuid4()),
+        "type": "web_hook",
+        "address": f"{base}api/google/notificacao",
+        "token": token,
+        "params": {"ttl": str(_CANAL_TTL_SEG)},
+    }, headers={"Authorization": f"Bearer {_access_token()}"}, timeout=20)
+    if r.status_code != 200:
+        raise RuntimeError(f"Google recusou os avisos: {r.status_code} {r.text[:200]}")
+    dados = r.json()
+    database.set_setting("google_canal_id", dados.get("id", ""))
+    database.set_setting("google_canal_recurso", dados.get("resourceId", ""))
+    database.set_setting("google_canal_token", token)
+    database.set_setting("google_canal_expira", str(int(dados.get("expiration") or 0) // 1000))
+    print(f"[google] avisos ligados ate {dados.get('expiration')}")
+    return True
+
+
+def parar_avisos() -> None:
+    canal = database.get_setting("google_canal_id", "")
+    recurso = database.get_setting("google_canal_recurso", "")
+    if canal and recurso:
+        try:
+            requests.post(f"{_API}/channels/stop", json={"id": canal, "resourceId": recurso},
+                          headers={"Authorization": f"Bearer {_access_token()}"}, timeout=15)
+        except Exception as e:
+            print(f"[google] WARN ao parar os avisos: {e}")
+    for chave in ("google_canal_id", "google_canal_recurso", "google_canal_token", "google_canal_expira"):
+        database.set_setting(chave, "")
+
+
+def renovar_avisos_se_preciso() -> None:
+    """Chamado pelo agendador: abre o canal se não há, ou renova antes de vencer."""
+    if not conectado():
+        return
+    try:
+        expira = int(database.get_setting("google_canal_expira", "") or 0)
+    except ValueError:
+        expira = 0
+    if expira - time.time() > _RENOVAR_ANTES_SEG:
+        return
+    iniciar_avisos()
+
+
+def aviso_valido(canal_id: str, token: str) -> bool:
+    esperado = database.get_setting("google_canal_token", "")
+    return bool(esperado) and token == esperado and canal_id == database.get_setting("google_canal_id", "")
+
+
+_ultima_checagem = {"em": 0.0}
+
+
+def houve_mudanca() -> bool:
+    """Algum evento criado, alterado ou apagado desde a última checagem?"""
+    from datetime import timezone
+    agora = time.time()
+    desde = _ultima_checagem["em"] or agora
+    _ultima_checagem["em"] = agora
+    if desde >= agora:
+        return False                 # primeira checagem: só marca o ponto de partida
+    # Folga de 5 s: o relógio do Google e o nosso não batem ao segundo.
+    marco = datetime.fromtimestamp(desde - 5, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    r = requests.get(f"{_API}/calendars/{_calendario()}/events", params={
+        "updatedMin": marco, "showDeleted": "true", "maxResults": "1", "fields": "items(id)",
+    }, headers={"Authorization": f"Bearer {_access_token()}"}, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
+    return bool(r.json().get("items"))

@@ -46,6 +46,11 @@ pronto-socorro/SAMU (192), e a conversa é transferida.
   `GOOGLE_CLIENT_SECRET` no Render, o botão "Conectar Google Calendar" na
   Agenda liga a conta do consultório. A partir daí, confirmar, remarcar e
   cancelar refletem no calendário. Sem conexão, tudo fica só no painel.
+  No sentido contrário, o que for marcado direto no Google aparece na Agenda
+  (em verde, só leitura) e conta no alerta de conflito. O Google avisa o
+  painel quando a agenda muda (push em `/api/google/notificacao`, canal
+  renovado sozinho a cada 7 dias), e a tela se atualiza em segundos; uma
+  checagem a cada 30 s, só com o painel aberto, cobre aviso perdido.
 - **CRM**: só automações de mensagem (lembretes, marketing): Automações,
   Follow-ups e Logs.
 
