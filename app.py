@@ -1103,7 +1103,16 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-limiter = Limiter(get_remote_address, app=app, default_limits=["200 per minute"])
+def _ip_do_cliente() -> str:
+    # Atras do proxy do Render todo mundo chegava com o mesmo endereco: o limite
+    # de 200/min era do painel INTEIRO, e estourar devolvia 429 em HTML - a
+    # Agenda falhava em silencio e so voltava no minuto seguinte.
+    encaminhado = request.headers.get("X-Forwarded-For", "")
+    return encaminhado.split(",")[0].strip() if encaminhado else get_remote_address()
+
+
+limiter = Limiter(_ip_do_cliente, app=app, default_limits=["200 per minute"],
+                  default_limits_exempt_when=lambda: bool(session.get("logged_in")))
 
 buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
 
@@ -1115,8 +1124,11 @@ garantir_base_de_conhecimento()
 # Inicia o scheduler de follow-ups CRM
 try:
     crm_scheduler.start_scheduler()
-    crm_scheduler.scheduler.add_job(_vigiar_google, "interval", seconds=30, id="vigiar_google",
+    crm_scheduler.scheduler.add_job(_vigiar_google, "interval", seconds=20, id="vigiar_google",
                                     max_instances=1, coalesce=True)
+    # A Agenda ja abre pronta depois de um deploy ou de o servidor acordar.
+    if google_agenda.conectado():
+        google_agenda.atualizar_janela_em_segundo_plano()
 except Exception as e:
     print(f"[crm] WARN: scheduler nao iniciado: {e}")
 
@@ -2422,6 +2434,22 @@ def api_agendamentos_listar():
     ))
 
 
+@app.get("/api/agenda")
+@login_required
+def api_agenda():
+    """Agendamentos confirmados + eventos do Google do periodo, numa ida so."""
+    de, ate = request.args.get("de", ""), request.args.get("ate", "")
+    ags = database.listar_agendamentos(status="confirmado", de=de, ate=ate)
+    google, erro = [], ""
+    if google_agenda.conectado():
+        try:
+            google = google_agenda.eventos_do_periodo(de, ate, database.ids_eventos_google())
+        except Exception as e:
+            erro = str(e)[:200]
+            print(f"[google] WARN leitura da agenda: {e}")
+    return jsonify({"ags": ags, "google": google, "google_erro": erro})
+
+
 @app.get("/api/google/eventos")
 @login_required
 def api_google_eventos():
@@ -2429,7 +2457,7 @@ def api_google_eventos():
     if not google_agenda.conectado():
         return jsonify({"conectado": False, "eventos": []})
     try:
-        eventos = google_agenda.listar_eventos(
+        eventos = google_agenda.eventos_do_periodo(
             request.args.get("de", ""), request.args.get("ate", ""),
             database.ids_eventos_google())
     except Exception as e:
@@ -2593,6 +2621,7 @@ def api_google_callback():
         print(f"[google] ERRO na conexao: {e}")
         return redirect("/panel?google=erro")
     _sincronizar_pendentes_google()
+    google_agenda.atualizar_janela_em_segundo_plano()
     try:
         google_agenda.iniciar_avisos(_url_base())
     except Exception as e:
@@ -2608,7 +2637,9 @@ def api_google_notificacao():
                                       request.headers.get("X-Goog-Channel-Token", "")):
         return "", 404
     if request.headers.get("X-Goog-Resource-State") != "sync":   # "sync" = canal aberto
-        _avisar_mudanca_no_google("aviso do Google")
+        # Responde na hora (o Google espera um 200 rapido); a leitura vem depois.
+        google_agenda.atualizar_janela_em_segundo_plano(
+            lambda mudou: _avisar_mudanca_no_google("aviso do Google") if mudou else None)
     return "", 200
 
 
@@ -2619,18 +2650,22 @@ def _avisar_mudanca_no_google(origem: str) -> None:
 
 
 def _vigiar_google() -> None:
-    """A cada 30 s: renova o canal de avisos e, com o painel aberto, confere se
-    algo mudou no Google - rede de segurança para aviso que se perdeu."""
+    """A cada 20 s: renova o canal de avisos e mantem a copia da agenda em dia.
+
+    Com um painel aberto, rele o Google a cada passagem e avisa a tela se
+    mudou - funciona mesmo sem os avisos (push) do Google. Sem ninguem
+    olhando, so a cada 5 minutos, para a Agenda ja abrir pronta.
+    """
     if not google_agenda.conectado():
         return
     try:
         google_agenda.renovar_avisos_se_preciso()
     except Exception as e:
         print(f"[google] WARN renovacao dos avisos: {e}")
-    if not events.tem_ouvintes():
+    if not events.tem_ouvintes() and google_agenda.idade_da_janela() < 300:
         return
     try:
-        if google_agenda.houve_mudanca():
+        if google_agenda.atualizar_janela():
             _avisar_mudanca_no_google("checagem")
     except Exception as e:
         print(f"[google] WARN checagem de mudancas: {e}")
@@ -2657,6 +2692,10 @@ def api_google_sincronizar():
     if not google_agenda.conectado():
         return jsonify({"error": "Google Calendar não conectado"}), 400
     google_agenda.limpar_cache()   # traz agora o que foi marcado no Google
+    try:
+        google_agenda.atualizar_janela()
+    except Exception as e:
+        print(f"[google] WARN leitura da agenda: {e}")
     return jsonify({"ok": True, **_sincronizar_pendentes_google()})
 
 

@@ -171,7 +171,7 @@ function loadView(view) {
         case 'agenda':
             loadAgendaConfig();
             loadAgenda();
-            pollTimers.push(setInterval(agendaAtualizarEmSegundoPlano, 60000));
+            pollTimers.push(setInterval(agendaAtualizarEmSegundoPlano, 20000));
             break;
     }
 }
@@ -186,7 +186,14 @@ async function api(url, opts = {}) {
         window.location.href = '/login';
         return null;
     }
-    return res.json();
+    // Erro com pagina HTML (429, 502 do Render acordando...) nao e JSON: sem
+    // isto a promessa quebrava e a tela ficava esperando a proxima rodada.
+    try {
+        return await res.json();
+    } catch (e) {
+        console.warn(`[api] ${url}: resposta ${res.status} sem JSON`);
+        return null;
+    }
 }
 
 /* ── Dashboard ────────────────────────────────────────────────────────────── */
@@ -3374,15 +3381,15 @@ async function loadAgendaConfig() {
 
 // Agendamentos do painel + o que foi marcado direto no Google, juntos por periodo.
 const agendaGoogle = new Map();   // id do evento -> evento (para o detalhe)
+let agendaNovaTentativa = null;
 async function agendaBuscar(ini, fim) {
-    const [ags, g] = await Promise.all([
-        api(agendaUrl(ini, fim)),
-        api(`/api/google/eventos?de=${isoDia(ini)}&ate=${isoDia(fim)}`),
-    ]);
-    if (!ags) return null;
-    const google = (g && g.eventos) || [];
+    // Uma ida so: agendamentos + Google. O servidor tem a agenda do Google em
+    // memoria, entao isto nao espera o Google responder.
+    const r = await api(`/api/agenda?de=${isoDia(ini)}&ate=${isoDia(fim)}`).catch(() => null);
+    if (!r || !Array.isArray(r.ags)) return null;
+    const google = Array.isArray(r.google) ? r.google : [];
     google.forEach(e => agendaGoogle.set(e.id, e));
-    return { ags, google };
+    return { ags: r.ags, google };
 }
 
 // `silencioso`: atualizacao em segundo plano (a cada minuto e ao voltar para
@@ -3403,6 +3410,11 @@ async function loadAgenda(animacao = null, silencioso = false) {
 
     const dados = await agendaBuscar(ini, fim);
     if (req !== agendaReq) return;  // usuario ja navegou para outro periodo
+    if (!dados) {
+        clearTimeout(agendaNovaTentativa);
+        agendaNovaTentativa = setTimeout(() => { if (currentView === 'agenda') loadAgenda(null, true); }, 2000);
+        if (!guardado) return;          // segue com a barra de carregamento
+    }
     if (dados) agendaCache.set(chave, dados);
     if (dados && (!guardado || JSON.stringify(guardado) !== JSON.stringify(dados))) {
         renderAgenda(dados, ini, fim, null, false);
@@ -3539,9 +3551,22 @@ function renderGoogleStatus(g) {
     } else {
         box.innerHTML = `<span class="agenda-google-ok">● Sincronizado com o Google Calendar${g.email ? ` (${esc(g.email)})` : ''}</span>
             <span class="muted agenda-legenda"><i class="leg-painel"></i>avaliações do painel <i class="leg-google"></i>marcados no Google</span>
+            ${statusAtualizacaoGoogle(g.atualizacao || {})}
             <button class="btn-secondary btn-sm" onclick="sincronizarGoogle()">Sincronizar agora</button>
             <button class="btn-secondary btn-sm" onclick="desconectarGoogle()">Desconectar</button>`;
     }
+}
+
+// O que o Google marcar aparece sozinho? Mostra o motivo quando nao.
+function statusAtualizacaoGoogle(a) {
+    if (a.leitura_erro) {
+        return `<span class="agenda-auto erro" title="${esc(a.leitura_erro)}">⚠ Não consegui ler o Google Agenda agora</span>`;
+    }
+    if (a.avisos_ativos) {
+        return '<span class="agenda-auto ok">Atualização automática: instantânea</span>';
+    }
+    const motivo = a.avisos_erro ? ` (avisos do Google desligados: ${a.avisos_erro})` : '';
+    return `<span class="agenda-auto" title="${esc(motivo)}">Atualização automática: a cada 20 s${a.avisos_erro ? ' ⓘ' : ''}</span>`;
 }
 
 async function sincronizarGoogle() {

@@ -54,11 +54,13 @@ def conectado() -> bool:
 
 
 def status() -> dict:
+    ligado = conectado()
     return {
         "configurado": configurado(),
-        "conectado": conectado(),
-        "email": database.get_setting("google_email", "") if conectado() else "",
+        "conectado": ligado,
+        "email": database.get_setting("google_email", "") if ligado else "",
         "calendario": _cfg("GOOGLE_CALENDAR_ID", "primary"),
+        "atualizacao": diagnostico() if ligado else {},
     }
 
 
@@ -203,6 +205,9 @@ def apagar_evento(event_id: str) -> None:
                         headers={"Authorization": f"Bearer {_access_token()}"}, timeout=20)
     if r.status_code not in (200, 204, 404, 410):
         raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
+    with _janela_lock:
+        if _JANELA["eventos"] is not None:
+            _JANELA["eventos"] = [e for e in _JANELA["eventos"] if e["id"] != event_id]
     limpar_cache()
 
 
@@ -299,7 +304,7 @@ def conflitos(inicio: str, duracao_min: int, ignorar: set | None = None) -> list
     dia = ini.strftime("%Y-%m-%d")
     seguinte = (ini + timedelta(days=1)).strftime("%Y-%m-%d")
     saida = []
-    for e in listar_eventos(dia, seguinte, ignorar):
+    for e in eventos_do_periodo(dia, seguinte, ignorar):
         if e["dia_inteiro"] or not e["ocupa"]:
             continue
         e_ini, e_fim = datetime.fromisoformat(e["inicio"]), datetime.fromisoformat(e["fim"])
@@ -331,6 +336,7 @@ def iniciar_avisos(host_url: str = "") -> bool:
     import uuid
     base = base_publica(host_url)
     if not base.startswith("https://"):
+        _DIAG["avisos_erro"] = f"sem endereço https público ({base or 'nenhum'})"
         print(f"[google] avisos desligados: o Google so avisa endereco https ({base or 'sem endereco'})")
         return False
     if host_url.startswith("https://"):
@@ -345,7 +351,9 @@ def iniciar_avisos(host_url: str = "") -> bool:
         "params": {"ttl": str(_CANAL_TTL_SEG)},
     }, headers={"Authorization": f"Bearer {_access_token()}"}, timeout=20)
     if r.status_code != 200:
+        _DIAG["avisos_erro"] = f"Google recusou ({r.status_code}): {r.text[:160]}"
         raise RuntimeError(f"Google recusou os avisos: {r.status_code} {r.text[:200]}")
+    _DIAG["avisos_erro"] = ""
     dados = r.json()
     database.set_setting("google_canal_id", dados.get("id", ""))
     database.set_setting("google_canal_recurso", dados.get("resourceId", ""))
@@ -386,22 +394,106 @@ def aviso_valido(canal_id: str, token: str) -> bool:
     return bool(esperado) and token == esperado and canal_id == database.get_setting("google_canal_id", "")
 
 
-_ultima_checagem = {"em": 0.0}
+
+# ── Copia da agenda do Google em memoria ─────────────────────────────────────
+# Abrir a aba Agenda nao pode esperar o Google: a janela de 3 meses para tras
+# ate 1 ano para frente fica em memoria, atualizada em segundo plano (pelo
+# agendador e a cada aviso). As requisicoes do painel so filtram.
+import threading as _threading
+from datetime import date as _date
+
+_JANELA: dict = {"de": "", "ate": "", "eventos": None, "em": 0.0}
+_janela_lock = _threading.Lock()
+_atualizando = _threading.Lock()
+_DIAG: dict = {"avisos_erro": "", "leitura_erro": "", "checagem_em": 0.0}
 
 
-def houve_mudanca() -> bool:
-    """Algum evento criado, alterado ou apagado desde a última checagem?"""
-    from datetime import timezone
-    agora = time.time()
-    desde = _ultima_checagem["em"] or agora
-    _ultima_checagem["em"] = agora
-    if desde >= agora:
-        return False                 # primeira checagem: só marca o ponto de partida
-    # Folga de 5 s: o relógio do Google e o nosso não batem ao segundo.
-    marco = datetime.fromtimestamp(desde - 5, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    r = requests.get(f"{_API}/calendars/{_calendario()}/events", params={
-        "updatedMin": marco, "showDeleted": "true", "maxResults": "1", "fields": "items(id)",
-    }, headers={"Authorization": f"Bearer {_access_token()}"}, timeout=15)
-    if r.status_code != 200:
-        raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
-    return bool(r.json().get("items"))
+def _limites_da_janela() -> tuple[str, str]:
+    hoje = _date.today()
+    return (hoje - timedelta(days=95)).isoformat(), (hoje + timedelta(days=400)).isoformat()
+
+
+def atualizar_janela() -> bool:
+    """Le de novo a janela inteira. True se algo mudou desde a ultima leitura."""
+    if not conectado():
+        return False
+    if not _atualizando.acquire(blocking=False):
+        return False                       # ja tem uma leitura em andamento
+    try:
+        de, ate = _limites_da_janela()
+        eventos, pagina = [], ""
+        while True:
+            params = {"timeMin": f"{de}T00:00:00{_offset()}", "timeMax": f"{ate}T00:00:00{_offset()}",
+                      "singleEvents": "true", "orderBy": "startTime", "maxResults": "2500"}
+            if pagina:
+                params["pageToken"] = pagina
+            r = requests.get(f"{_API}/calendars/{_calendario()}/events", params=params,
+                             headers={"Authorization": f"Bearer {_access_token()}"}, timeout=20)
+            if r.status_code != 200:
+                _DIAG["leitura_erro"] = f"{r.status_code} {r.text[:120]}"
+                raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
+            dados = r.json()
+            eventos += [e for e in (_evento_do_google(ev) for ev in dados.get("items") or []
+                                    if ev.get("status") != "cancelled") if e]
+            pagina = dados.get("nextPageToken", "")
+            if not pagina:
+                break
+        _DIAG["leitura_erro"] = ""
+        _DIAG["checagem_em"] = time.time()
+        with _janela_lock:
+            mudou = _JANELA["eventos"] is not None and _JANELA["eventos"] != eventos
+            _JANELA.update(de=de, ate=ate, eventos=eventos, em=time.time())
+        return mudou
+    finally:
+        _atualizando.release()
+
+
+def atualizar_janela_em_segundo_plano(depois=None) -> None:
+    """Le a janela numa thread; `depois(mudou)` roda no fim (ex.: avisar o painel)."""
+    def _trabalho():
+        try:
+            mudou = atualizar_janela()
+        except Exception as e:
+            print(f"[google] WARN leitura da agenda: {e}")
+            return
+        if depois:
+            depois(mudou)
+    _threading.Thread(target=_trabalho, daemon=True).start()
+
+
+def idade_da_janela() -> float:
+    return time.time() - _JANELA["em"] if _JANELA["eventos"] is not None else float("inf")
+
+
+def eventos_do_periodo(de: str, ate: str, ignorar: set | None = None) -> list[dict]:
+    """Eventos que tocam o periodo, da copia em memoria (sem esperar o Google).
+
+    Periodo fora da janela, ou janela ainda vazia (logo apos o servidor
+    subir), cai na leitura direta com cache curto.
+    """
+    if not conectado():
+        return []
+    with _janela_lock:
+        eventos, j_de, j_ate = _JANELA["eventos"], _JANELA["de"], _JANELA["ate"]
+    if eventos is None or not (j_de <= de and ate <= j_ate):
+        if eventos is None:
+            atualizar_janela_em_segundo_plano()
+        return listar_eventos(de, ate, ignorar)
+    ignorar = ignorar or set()
+    ini, fim = f"{de}T00:00", f"{ate}T00:00"
+    return [e for e in eventos if e["id"] not in ignorar and e["inicio"] < fim and e["fim"] > ini]
+
+
+def diagnostico() -> dict:
+    """Para a linha de status da Agenda: a atualizacao automatica esta viva?"""
+    try:
+        expira = int(database.get_setting("google_canal_expira", "") or 0)
+    except ValueError:
+        expira = 0
+    idade = idade_da_janela()
+    return {
+        "avisos_ativos": expira > time.time(),
+        "avisos_erro": _DIAG["avisos_erro"],
+        "leitura_erro": _DIAG["leitura_erro"],
+        "idade_seg": None if idade == float("inf") else int(idade),
+    }
