@@ -1428,6 +1428,13 @@ def contar_agendamentos_pendentes() -> int:
     return int((row or {}).get("n") or 0)
 
 
+def ids_eventos_google() -> set:
+    """Eventos do Google que o painel criou (um por agendamento confirmado)."""
+    linhas = db.fetch_all("SELECT google_event_id FROM agendamentos "
+                          "WHERE google_event_id IS NOT NULL AND google_event_id <> ''")
+    return {l["google_event_id"] for l in linhas}
+
+
 def conflitos_de_horario(inicio: str, duracao_min: int, ignorar_id: int = 0) -> list[dict]:
     """Agendamentos confirmados que se sobrepoem ao horario pedido."""
     try:

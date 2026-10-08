@@ -2420,6 +2420,22 @@ def api_agendamentos_listar():
     ))
 
 
+@app.get("/api/google/eventos")
+@login_required
+def api_google_eventos():
+    """Eventos marcados direto no Google Calendar, para a grade da Agenda."""
+    if not google_agenda.conectado():
+        return jsonify({"conectado": False, "eventos": []})
+    try:
+        eventos = google_agenda.listar_eventos(
+            request.args.get("de", ""), request.args.get("ate", ""),
+            database.ids_eventos_google())
+    except Exception as e:
+        print(f"[google] WARN leitura da agenda: {e}")
+        return jsonify({"conectado": True, "eventos": [], "erro": str(e)[:200]})
+    return jsonify({"conectado": True, "eventos": eventos})
+
+
 @app.get("/api/agendamentos/pendentes/count")
 @login_required
 def api_agendamentos_pendentes_count():
@@ -2448,6 +2464,12 @@ def _salvar_horario(ag_id: int, remarcar: bool):
     if erro:
         return jsonify({"error": erro}), 400
     conflitos = database.conflitos_de_horario(inicio, duracao, ignorar_id=ag_id)
+    if google_agenda.conectado():
+        # O que foi marcado direto no Google tambem ocupa o horario.
+        try:
+            conflitos += google_agenda.conflitos(inicio, duracao, database.ids_eventos_google())
+        except Exception as e:
+            print(f"[google] WARN conflitos do Google indisponiveis: {e}")
     if conflitos and not data.get("forcar"):
         return jsonify({"error": "conflito", "conflitos": conflitos}), 409
 
@@ -2592,6 +2614,7 @@ def _sincronizar_pendentes_google() -> dict:
 def api_google_sincronizar():
     if not google_agenda.conectado():
         return jsonify({"error": "Google Calendar não conectado"}), 400
+    google_agenda.limpar_cache()   # traz agora o que foi marcado no Google
     return jsonify({"ok": True, **_sincronizar_pendentes_google()})
 
 

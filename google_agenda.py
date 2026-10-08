@@ -3,7 +3,9 @@ google_agenda.py — Sincronização opcional da Agenda do painel com o Google C
 
 Sem conexão, a agenda funciona só no painel: nada aqui é obrigatório. Com
 conexão, cada agendamento confirmado vira um evento no calendário do
-consultório, e reagendar/cancelar no painel atualiza/apaga o evento.
+consultório, e reagendar/cancelar no painel atualiza/apaga o evento. No
+sentido contrário, o que for marcado direto no Google aparece na Agenda do
+painel (só leitura) e conta no alerta de conflito de horário.
 
 Conexão por OAuth 2.0 (fluxo web), só com `requests` — sem dependência nova:
 1. No Google Cloud Console, crie um "ID do cliente OAuth" do tipo "Aplicativo
@@ -179,6 +181,7 @@ def salvar_evento(ag: dict) -> str:
         r = requests.patch(f"{_API}/calendars/{_calendario()}/events/{ag['google_event_id']}",
                            json=corpo, headers=headers, timeout=20)
         if r.status_code == 200:
+            limpar_cache()
             return ag["google_event_id"]
         if r.status_code not in (404, 410):
             raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
@@ -187,6 +190,7 @@ def salvar_evento(ag: dict) -> str:
                       headers=headers, timeout=20)
     if r.status_code not in (200, 201):
         raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
+    limpar_cache()
     return r.json().get("id", "")
 
 
@@ -197,3 +201,107 @@ def apagar_evento(event_id: str) -> None:
                         headers={"Authorization": f"Bearer {_access_token()}"}, timeout=20)
     if r.status_code not in (200, 204, 404, 410):
         raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
+    limpar_cache()
+
+
+# ── Leitura: o que foi marcado direto no Google aparece no painel ────────────
+# Cache curto por período: a grade pede o mês e os vizinhos a cada clique, e a
+# agenda do consultório não muda a cada segundo. Gravar ou apagar pelo painel
+# limpa o cache.
+_CACHE_SEG = 60.0
+_cache_eventos: dict[tuple, tuple[float, list]] = {}
+
+
+def _horas_offset() -> float:
+    try:
+        return float(os.getenv("TZ_OFFSET_HORAS", "-3"))
+    except ValueError:
+        return -3.0
+
+
+def _para_local(valor: str) -> datetime:
+    """'2026-10-09T10:00:00-03:00' (ou 'Z') -> datetime local sem fuso."""
+    from datetime import timezone
+    dt = datetime.fromisoformat(valor.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone(timedelta(hours=_horas_offset()))).replace(tzinfo=None)
+
+
+def _evento_do_google(ev: dict) -> dict | None:
+    ini, fim = ev.get("start") or {}, ev.get("end") or {}
+    if ini.get("dateTime"):
+        inicio = _para_local(ini["dateTime"])
+        termino = _para_local(fim["dateTime"]) if fim.get("dateTime") else inicio + timedelta(hours=1)
+        dia_inteiro = False
+    elif ini.get("date"):
+        inicio = datetime.fromisoformat(ini["date"])
+        termino = datetime.fromisoformat(fim["date"]) if fim.get("date") else inicio + timedelta(days=1)
+        dia_inteiro = True
+    else:
+        return None
+    return {
+        "id": ev.get("id", ""),
+        "titulo": ev.get("summary") or "(sem título)",
+        "inicio": inicio.strftime("%Y-%m-%dT%H:%M"),
+        "fim": termino.strftime("%Y-%m-%dT%H:%M"),
+        "duracao_min": max(1, int((termino - inicio).total_seconds() // 60)),
+        "dia_inteiro": dia_inteiro,
+        "descricao": (ev.get("description") or "")[:2000],
+        "local": ev.get("location") or "",
+        "link": ev.get("htmlLink") or "",
+        # "Livre" no Google (transparent) não ocupa o horário.
+        "ocupa": ev.get("transparency") != "transparent",
+    }
+
+
+def listar_eventos(de: str, ate: str, ignorar: set | None = None) -> list[dict]:
+    """Eventos do calendário entre as datas (YYYY-MM-DD, `ate` exclusivo).
+
+    `ignorar`: ids de evento que o próprio painel criou (os agendamentos) -
+    esses já aparecem na grade como agendamento e não podem vir em dobro.
+    """
+    if not conectado():
+        return []
+    chave = (de, ate)
+    guardado = _cache_eventos.get(chave)
+    if guardado and time.time() - guardado[0] < _CACHE_SEG:
+        eventos = guardado[1]
+    else:
+        params = {
+            "timeMin": f"{de}T00:00:00{_offset()}",
+            "timeMax": f"{ate}T00:00:00{_offset()}",
+            "singleEvents": "true",      # repetições viram ocorrências
+            "orderBy": "startTime",
+            "maxResults": "500",
+        }
+        r = requests.get(f"{_API}/calendars/{_calendario()}/events", params=params,
+                         headers={"Authorization": f"Bearer {_access_token()}"}, timeout=20)
+        if r.status_code != 200:
+            raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
+        eventos = [e for e in (_evento_do_google(ev) for ev in r.json().get("items") or []
+                               if ev.get("status") != "cancelled") if e]
+        _cache_eventos[chave] = (time.time(), eventos)
+    ignorar = ignorar or set()
+    return [e for e in eventos if e["id"] not in ignorar]
+
+
+def limpar_cache() -> None:
+    _cache_eventos.clear()
+
+
+def conflitos(inicio: str, duracao_min: int, ignorar: set | None = None) -> list[dict]:
+    """Eventos do Google que ocupam o horário pedido, no formato dos conflitos do banco."""
+    ini = datetime.fromisoformat(inicio)
+    fim = ini + timedelta(minutes=duracao_min)
+    dia = ini.strftime("%Y-%m-%d")
+    seguinte = (ini + timedelta(days=1)).strftime("%Y-%m-%d")
+    saida = []
+    for e in listar_eventos(dia, seguinte, ignorar):
+        if e["dia_inteiro"] or not e["ocupa"]:
+            continue
+        e_ini, e_fim = datetime.fromisoformat(e["inicio"]), datetime.fromisoformat(e["fim"])
+        if e_ini < fim and ini < e_fim:
+            saida.append({"id": 0, "nome": f"{e['titulo']} (Google Agenda)",
+                          "inicio": e["inicio"], "duracao_min": e["duracao_min"]})
+    return saida

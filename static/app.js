@@ -171,6 +171,7 @@ function loadView(view) {
         case 'agenda':
             loadAgendaConfig();
             loadAgenda();
+            pollTimers.push(setInterval(agendaAtualizarEmSegundoPlano, 60000));
             break;
     }
 }
@@ -3368,7 +3369,22 @@ async function loadAgendaConfig() {
     renderGoogleStatus(cfg.google || {});
 }
 
-async function loadAgenda(animacao = null) {
+// Agendamentos do painel + o que foi marcado direto no Google, juntos por periodo.
+const agendaGoogle = new Map();   // id do evento -> evento (para o detalhe)
+async function agendaBuscar(ini, fim) {
+    const [ags, g] = await Promise.all([
+        api(agendaUrl(ini, fim)),
+        api(`/api/google/eventos?de=${isoDia(ini)}&ate=${isoDia(fim)}`),
+    ]);
+    if (!ags) return null;
+    const google = (g && g.eventos) || [];
+    google.forEach(e => agendaGoogle.set(e.id, e));
+    return { ags, google };
+}
+
+// `silencioso`: atualizacao em segundo plano (a cada minuto e ao voltar para
+// a aba). So redesenha se algo mudou - sem piscar, sem animacao.
+async function loadAgenda(animacao = null, silencioso = false) {
     const req = ++agendaReq;
     const [ini, fim] = agendaIntervalo();
     const chave = agendaUrl(ini, fim);
@@ -3379,36 +3395,63 @@ async function loadAgenda(animacao = null) {
     // A grade do periodo novo aparece NA HORA (com o que estiver guardado);
     // os horarios chegam depois, sem esperar o servidor para mudar de tela.
     const guardado = agendaCache.get(chave);
-    renderAgenda(guardado || [], ini, fim, animacao, !guardado);
+    if (!silencioso) renderAgenda(guardado || { ags: [], google: [] }, ini, fim, animacao, !guardado);
     agendaChaveNaTela = chave;
 
-    const ags = await api(chave);
+    const dados = await agendaBuscar(ini, fim);
     if (req !== agendaReq) return;  // usuario ja navegou para outro periodo
-    if (ags) agendaCache.set(chave, ags);
-    if (!guardado || JSON.stringify(guardado) !== JSON.stringify(ags)) {
-        renderAgenda(ags || [], ini, fim, null, false);
+    if (dados) agendaCache.set(chave, dados);
+    if (dados && (!guardado || JSON.stringify(guardado) !== JSON.stringify(dados))) {
+        renderAgenda(dados, ini, fim, null, false);
     } else {
         document.getElementById('agenda-grade').classList.remove('carregando');
     }
-    agendaPrecarregar();
+    if (!silencioso) agendaPrecarregar();
 }
 
 function agendaPrecarregar() {
     [-1, 1].forEach(delta => {
         const [ini, fim] = agendaIntervalo(agendaRefDeslocada(delta));
         const url = agendaUrl(ini, fim);
-        if (!agendaCache.has(url)) api(url).then(r => { if (r) agendaCache.set(url, r); });
+        if (!agendaCache.has(url)) agendaBuscar(ini, fim).then(r => { if (r) agendaCache.set(url, r); });
     });
 }
 
-function renderAgenda(ags, ini, fim, animacao, carregando) {
+// Com a aba Agenda aberta: o que alguem marcar no Google aparece sozinho.
+function agendaAtualizarEmSegundoPlano() {
+    if (currentView !== 'agenda' || document.hidden) return;
+    const guardado = agendaCache.get(agendaChaveNaTela);
+    agendaCache.clear();
+    if (guardado) agendaCache.set(agendaChaveNaTela, guardado);  // base da comparacao
+    loadAgenda(null, true);
+}
+window.addEventListener('focus', agendaAtualizarEmSegundoPlano);
+
+function renderAgenda(dados, ini, fim, animacao, carregando) {
+    const { ags = [], google = [] } = dados || {};
     const porDia = {};
-    ags.forEach(a => { (porDia[(a.inicio || '').slice(0, 10)] ||= []).push(a); });
+    ags.forEach(a => {
+        (porDia[(a.inicio || '').slice(0, 10)] ||= []).push({ tipo: 'ag', hora: (a.inicio || '').slice(11, 16), item: a });
+    });
+    google.forEach(e => {
+        if (e.dia_inteiro) {
+            // Evento de dia inteiro (ferias, congresso...): aparece em cada dia.
+            for (let d = new Date(e.inicio); d < new Date(e.fim); d.setDate(d.getDate() + 1)) {
+                (porDia[isoDia(d)] ||= []).push({ tipo: 'g', hora: '', item: e });
+            }
+        } else {
+            (porDia[e.inicio.slice(0, 10)] ||= []).push({ tipo: 'g', hora: e.inicio.slice(11, 16), item: e });
+        }
+    });
+    Object.values(porDia).forEach(l => l.sort((a, b) => a.hora.localeCompare(b.hora)));
     const hoje = isoDia(new Date());
     const dias = [];
     for (let d = new Date(ini); d < fim; d.setDate(d.getDate() + 1)) dias.push(new Date(d));
-    const chip = (a, i) => `<button class="agenda-evento" style="--i:${Math.min(i, 6)}" onclick="detalheAgendamento(${a.id})" title="${esc(a.nome)}">
-        <span class="agenda-hora">${(a.inicio || '').slice(11, 16)}</span> ${esc(a.nome)}</button>`;
+    const chip = (x, i) => x.tipo === 'ag'
+        ? `<button class="agenda-evento" style="--i:${Math.min(i, 6)}" onclick="detalheAgendamento(${x.item.id})" title="${esc(x.item.nome)}">
+            <span class="agenda-hora">${x.hora}</span> ${esc(x.item.nome)}</button>`
+        : `<button class="agenda-evento google" style="--i:${Math.min(i, 6)}" data-gid="${esc(x.item.id)}" onclick="detalheEventoGoogle(this.dataset.gid)" title="${esc(x.item.titulo)} (Google Agenda)">
+            <span class="agenda-hora">${x.hora || 'Dia todo'}</span> ${esc(x.item.titulo)}</button>`;
     const semana = agendaModoAtual === 'semana';
     const grade = document.getElementById('agenda-grade');
     grade.classList.toggle('carregando', !!carregando);
@@ -3429,12 +3472,30 @@ function renderAgenda(ags, ini, fim, animacao, carregando) {
                 </div>`;
             }).join('')}
         </div>
-        ${ags.length || carregando ? '' : '<p class="muted agenda-vazia">Nenhuma avaliação confirmada neste período.</p>'}`;
+        ${ags.length || google.length || carregando ? '' : '<p class="muted agenda-vazia">Nenhum compromisso neste período.</p>'}`;
     if (animacao && !reduzirMovimento()) {
         corpo.classList.remove('anim-prox', 'anim-ant', 'anim-modo');
         void corpo.offsetWidth;  // reinicia a animacao
         corpo.classList.add(`anim-${animacao}`);
     }
+}
+
+function detalheEventoGoogle(id) {
+    const e = agendaGoogle.get(id);
+    if (!e) return;
+    const quando = e.dia_inteiro ? 'Dia todo' : `${quandoAgendamento(e.inicio)} · ${duracaoTexto(e.duracao_min)}`;
+    const dia = e.dia_inteiro ? `${pad2(Number(e.inicio.slice(8, 10)))}/${e.inicio.slice(5, 7)} · ` : '';
+    document.getElementById('modal-title').textContent = e.titulo;
+    document.getElementById('modal-body').innerHTML = `
+        <div class="ag-detalhe">
+            <p><strong>${esc(dia + quando)}</strong></p>
+            <p class="muted">Marcado direto no Google Agenda${e.ocupa ? '' : ' · aparece como livre'}</p>
+            ${e.local ? `<p><strong>Local:</strong> ${esc(e.local)}</p>` : ''}
+            ${e.descricao ? `<pre class="ag-resumo">${esc(e.descricao)}</pre>` : ''}
+            <p class="muted">Para alterar ou apagar, use o Google Agenda.</p>
+            ${e.link ? `<div class="ag-acoes"><a class="btn-primary btn-sm" href="${esc(e.link)}" target="_blank" rel="noopener">Abrir no Google Agenda</a></div>` : ''}
+        </div>`;
+    document.getElementById('modal-overlay').style.display = 'flex';
 }
 
 async function detalheAgendamento(agId) {
@@ -3474,6 +3535,7 @@ function renderGoogleStatus(g) {
             <a class="btn-primary btn-sm" href="/api/google/conectar">Conectar Google Calendar</a>`;
     } else {
         box.innerHTML = `<span class="agenda-google-ok">● Sincronizado com o Google Calendar${g.email ? ` (${esc(g.email)})` : ''}</span>
+            <span class="muted agenda-legenda"><i class="leg-painel"></i>avaliações do painel <i class="leg-google"></i>marcados no Google</span>
             <button class="btn-secondary btn-sm" onclick="sincronizarGoogle()">Sincronizar agora</button>
             <button class="btn-secondary btn-sm" onclick="desconectarGoogle()">Desconectar</button>`;
     }
