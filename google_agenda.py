@@ -386,7 +386,14 @@ def renovar_avisos_se_preciso() -> None:
         expira = 0
     if expira - time.time() > _RENOVAR_ANTES_SEG:
         return
-    iniciar_avisos()
+    # Google recusou ha pouco: nao insiste a cada 20 s (a checagem curta cobre).
+    if time.time() - _DIAG.get("avisos_falha_em", 0.0) < 1800:
+        return
+    try:
+        iniciar_avisos()
+    except Exception:
+        _DIAG["avisos_falha_em"] = time.time()
+        raise
 
 
 def aviso_valido(canal_id: str, token: str) -> bool:

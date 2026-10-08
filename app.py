@@ -2565,6 +2565,12 @@ def api_agendamento_cancelar(ag_id):
 @app.get("/api/settings/agenda")
 @login_required
 def api_get_agenda_settings():
+    # O canal de avisos do Google precisa do endereco https publico. Quem
+    # conectou antes de existir o canal nao tem o endereco salvo (e o Render
+    # nem sempre informa RENDER_EXTERNAL_URL): o painel aberto ensina.
+    base = _url_base()
+    if base.startswith("https://") and database.get_setting("google_base_url", "") != base:
+        database.set_setting("google_base_url", base)
     return jsonify({"duracao_padrao": _duracao_padrao(), "google": google_agenda.status()})
 
 
