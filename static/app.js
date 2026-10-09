@@ -699,11 +699,21 @@ async function deleteConv(convId) {
 }
 
 // Atualiza header + painel de detalhes sem reconstruir as mensagens (sem animação de "reabrir")
-async function refreshConversationPanel(convId) {
+// Etiquetas mudam raramente: 1 busca a cada minuto basta. Antes iam junto a
+// cada mensagem da conversa aberta.
+let _tagsCache = { em: 0, tags: null };
+async function tagsEmCache() {
+    if (_tagsCache.tags && Date.now() - _tagsCache.em < 60000) return _tagsCache.tags;
+    const tags = await api('/api/tags');
+    if (tags) _tagsCache = { em: Date.now(), tags };
+    return tags || _tagsCache.tags || [];
+}
+
+async function refreshConversationPanel(convId, dadosProntos = null) {
     if (!convId) return;
     const [data, allTags] = await Promise.all([
-        api(`/api/conversations/${convId}`),
-        api('/api/tags'),
+        dadosProntos || api(`/api/conversations/${convId}`),
+        tagsEmCache(),
     ]);
     if (!data) return;
     const { conversation: conv, contact, tags } = data;
@@ -2959,6 +2969,14 @@ document.addEventListener('keydown', e => {
 /* ── SSE ──────────────────────────────────────────────────────────────────── */
 let _convDebounce = null;
 let _dashDebounce = null;
+let _lidaTimer = null;
+function marcarLidaEmBreve(convId) {
+    clearTimeout(_lidaTimer);
+    _lidaTimer = setTimeout(() => {
+        if (currentConvId === convId) api(`/api/conversations/${convId}/read`, { method: 'PUT' });
+    }, 1500);
+}
+
 function debouncedLoadConversations() {
     clearTimeout(_convDebounce);
     _convDebounce = setTimeout(() => {
@@ -2986,8 +3004,11 @@ function connectSSE() {
         if (event === 'new_message') {
             if (currentView === 'conversations' || currentView === 'bot' || currentView === 'human-queue') {
                 if (currentConvId === data.conversation_id) {
-                    refreshConversationPanel(data.conversation_id);
+                    // Uma busca so, reaproveitada no cabecalho e nas mensagens.
+                    // Eram 4 requisicoes juntas a cada mensagem, no mesmo
+                    // instante em que o agente precisava do banco para responder.
                     const d = await api(`/api/conversations/${data.conversation_id}`);
+                    if (d && currentConvId === data.conversation_id) refreshConversationPanel(data.conversation_id, d);
                     if (d?.messages?.length) {
                         const last = d.messages[d.messages.length - 1];
                         if (lastSentBodyQueue.includes(last.body)) {
@@ -3000,9 +3021,9 @@ function connectSSE() {
                             }
                         }
                     }
-                    // A conversa está aberta e visível: marca como lida na hora,
-                    // sem precisar sair e voltar, e limpa o badge da lista.
-                    await api(`/api/conversations/${data.conversation_id}/read`, { method: 'PUT' });
+                    // A conversa está aberta e visível: marca como lida (agrupado:
+                    // varias mensagens seguidas viram uma marcacao so).
+                    marcarLidaEmBreve(data.conversation_id);
                     debouncedLoadConversations();
                 } else {
                     debouncedLoadConversations();
@@ -3013,13 +3034,10 @@ function connectSSE() {
         } else if (event === 'message_sent') {
             lastSentBodyQueue = [];
             if ((currentView === 'conversations' || currentView === 'bot' || currentView === 'human-queue') && currentConvId === data.conversation_id) {
-                refreshConversationPanel(data.conversation_id);
                 const d = await api(`/api/conversations/${data.conversation_id}`);
-                if (d?.messages?.length) {
-                    const msgDiv = document.getElementById('chat-messages');
-                    msgDiv.innerHTML = d.messages.map(m => msgHTML(m, false)).join('');
-                    bindMsgMedia(msgDiv);
-                    scrollChatBottom();
+                if (d && currentConvId === data.conversation_id) {
+                    refreshConversationPanel(data.conversation_id, d);
+                    if (d.messages?.length) renderMessages(d.messages);
                 }
             }
             if (currentView === 'dashboard') debouncedLoadDashboard();
@@ -3032,8 +3050,7 @@ function connectSSE() {
             else if (currentView === 'agenda') { agendaCache.clear(); loadAgenda(); }
         } else if (event === 'conversation_updated') {
             debouncedLoadConversations();
-            updateUnreadBadge();
-            updateHumanQueueBadge();
+            updateUnreadBadge();   // ja atualiza a Fila Humana
         } else if (event === 'tags_updated') {
             refreshTagsUI();
         } else if (event === 'crm_follow_up_sent') {
@@ -3055,7 +3072,15 @@ function connectSSE() {
     };
 }
 
-async function updateUnreadBadge() {
+// Os contadores do menu: varias mensagens seguidas viram UMA atualizacao.
+// Cada uma recalculava as estatisticas do painel inteiro no banco.
+let _badgeTimer = null;
+function updateUnreadBadge() {
+    clearTimeout(_badgeTimer);
+    _badgeTimer = setTimeout(_atualizarBadges, 1000);
+}
+
+async function _atualizarBadges() {
     const stats = await api('/api/dashboard');
     if (!stats) return;
     const badge = document.getElementById('unread-badge');

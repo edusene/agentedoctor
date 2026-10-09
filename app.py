@@ -1503,10 +1503,10 @@ def api_conversations_mark_read(conv_id):
             if msgs:
                 wa_mid = msgs[0].get("wa_message_id", "")
                 if wa_mid:
-                    try:
-                        mark_read(wa_mid)
-                    except Exception:
-                        pass
+                    # Chamada a Datafy (~1 s) que ninguem espera: em segundo
+                    # plano, como no webhook.
+                    threading.Thread(target=_marcar_lido_async, args=(str(wa_mid),),
+                                     daemon=True).start()
     events.emit("conversation_updated", {"conversation_id": conv_id, "unread_count": 0})
     return jsonify({"ok": True})
 

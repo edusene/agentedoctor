@@ -19,8 +19,29 @@ if DB_DRIVER == "postgresql":
 
 # ── Conexão persistente (PostgreSQL) ─────────────────────────────────────────
 
+import threading
+import time
+
 _pg_pool: "psycopg2.pool.ThreadedConnectionPool | None" = None
 _pg_init_done = False
+
+# Ate 09/10 o pool tinha 5 conexoes e NAO esperava: a sexta consulta ao mesmo
+# tempo levava "connection pool exhausted" na hora. Com a conversa aberta no
+# painel, cada mensagem dispara varias requisicoes juntas com o webhook e o
+# agente - e quem perdia a corrida era o agente, que entao nao respondia.
+# Agora o pool e maior e quem chega com ele cheio ESPERA a vez.
+_PG_MAX = int(os.getenv("DB_POOL_MAX", "12"))
+_PG_ESPERA_SEG = 20
+_pg_vagas = threading.BoundedSemaphore(_PG_MAX)
+
+# Conexao parada por muito tempo pode ter sido derrubada no caminho (proxy do
+# Supabase, NAT do Render): reaproveitada, a consulta ficava ~50 s pendurada
+# esperando a rede. Keepalive mantem viva e detecta a morta; tcp_user_timeout
+# poe um teto; e a que ficou parada demais e trocada antes de usar.
+_PG_OCIOSA_SEG = 120
+_PG_REDE = dict(connect_timeout=10, keepalives=1, keepalives_idle=20,
+                keepalives_interval=5, keepalives_count=3, tcp_user_timeout=10000)
+_pg_ultimo_uso: dict[int, float] = {}
 
 
 def _init_pg_pool():
@@ -34,11 +55,21 @@ def _init_pg_pool():
         print("[db] WARN: DATABASE_URL nao configurada")
         return
     try:
-        _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, 5, url)
-        print(f"[db] pool PostgreSQL conectado (1-5 conexoes)")
+        _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, _PG_MAX, url, **_PG_REDE)
+    except psycopg2.ProgrammingError:
+        # libpq antiga sem tcp_user_timeout: segue so com os keepalives
+        rede = {k: v for k, v in _PG_REDE.items() if k != "tcp_user_timeout"}
+        try:
+            _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, _PG_MAX, url, **rede)
+        except Exception as e:
+            print(f"[db] ERRO pool PostgreSQL: {e}")
+            _pg_pool = None
+            return
     except Exception as e:
         print(f"[db] ERRO pool PostgreSQL: {e}")
         _pg_pool = None
+        return
+    print(f"[db] pool PostgreSQL conectado (ate {_PG_MAX} conexoes, com espera)")
 
 
 def _autocommit(conn):
@@ -57,38 +88,63 @@ def _autocommit(conn):
 
 
 def _get_pg_conn():
-    """Retorna uma conexão do pool. Reconnecta se necessário."""
-    global _pg_pool
+    """Uma conexao do pool. Com todas em uso, espera a vez (ate 20 s)."""
     if _pg_pool is None:
         _init_pg_pool()
     if _pg_pool is None:
         raise ConnectionError("Pool PostgreSQL nao disponivel")
-
+    if not _pg_vagas.acquire(timeout=_PG_ESPERA_SEG):
+        raise ConnectionError(f"Banco ocupado: nenhuma conexao livre em {_PG_ESPERA_SEG}s")
     try:
         conn = _pg_pool.getconn()
-        # Verifica se a conexão está viva
-        if conn.closed:
-            _pg_pool.putconn(conn, close=True)
+        parada = time.monotonic() - _pg_ultimo_uso.get(id(conn), time.monotonic())
+        if conn.closed or parada > _PG_OCIOSA_SEG:
+            _descartar(conn)
             conn = _pg_pool.getconn()
         return _autocommit(conn)
     except Exception:
-        # Pool pode ter perdido conexões — reinicializa
-        try:
-            _init_pg_pool()
-            if _pg_pool:
-                return _autocommit(_pg_pool.getconn())
-        except Exception:
-            pass
+        _pg_vagas.release()
         raise
 
 
-def _put_pg_conn(conn):
-    """Devolve a conexão ao pool."""
-    if _pg_pool and conn and not conn.closed:
+def _descartar(conn):
+    """Fecha a conexao e tira do pool (sem devolver a vaga)."""
+    _pg_ultimo_uso.pop(id(conn), None)
+    try:
+        _pg_pool.putconn(conn, close=True)
+    except Exception:
         try:
-            _pg_pool.putconn(conn)
+            conn.close()
         except Exception:
             pass
+
+
+def _put_pg_conn(conn, quebrada: bool = False):
+    """Devolve a conexao ao pool e libera a vaga. Quebrada nao volta."""
+    if conn is None:
+        return
+    try:
+        if _pg_pool is None:
+            return
+        if quebrada or conn.closed:
+            _descartar(conn)
+        else:
+            _pg_ultimo_uso[id(conn)] = time.monotonic()
+            _pg_pool.putconn(conn)
+    except Exception:
+        pass
+    finally:
+        try:
+            _pg_vagas.release()
+        except ValueError:
+            pass
+
+
+def _erro_de_conexao(e: Exception) -> bool:
+    """A conexao em si falhou (rede, servidor fechou) - e nao a consulta."""
+    if DB_DRIVER != "postgresql":
+        return False
+    return isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError))
 
 
 def _get_conn():
@@ -142,6 +198,19 @@ def ago_sql(column: str, seconds: int) -> str:
     return f"{column} > datetime('now', '-{seconds} seconds')"
 
 
+def _falhou(conn, e: Exception) -> None:
+    """Devolve a conexao depois de um erro; a quebrada e descartada."""
+    if DB_DRIVER != "postgresql":
+        return
+    quebrada = _erro_de_conexao(e)
+    if not quebrada:
+        try:
+            conn.rollback()
+        except Exception:
+            quebrada = True
+    _put_pg_conn(conn, quebrada=quebrada)
+
+
 def execute(query: str, params: tuple | list | None = None, *, commit: bool = True) -> Any:
     """Executa uma query e opcionalmente faz commit. Retorna o cursor."""
     conn = _get_conn()
@@ -157,62 +226,48 @@ def execute(query: str, params: tuple | list | None = None, *, commit: bool = Tr
         if DB_DRIVER == "postgresql":
             _put_pg_conn(conn)
         return cur
-    except Exception:
-        if DB_DRIVER == "postgresql":
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            _put_pg_conn(conn)
+    except Exception as e:
+        _falhou(conn, e)
         raise
+
+
+def _ler(query: str, params, uma: bool):
+    conn = _get_conn()
+    cur = _cursor(conn)
+    adapted = _adapt_query(query)
+    try:
+        if params:
+            cur.execute(adapted, params)
+        else:
+            cur.execute(adapted)
+        resultado = cur.fetchone() if uma else cur.fetchall()
+        if DB_DRIVER == "postgresql":
+            _put_pg_conn(conn)
+        return resultado
+    except Exception as e:
+        _falhou(conn, e)
+        raise
+
+
+def _ler_com_nova_tentativa(query: str, params, uma: bool):
+    """Leitura nao altera nada: se a conexao estava morta, tenta numa nova."""
+    try:
+        return _ler(query, params, uma)
+    except Exception as e:
+        if not _erro_de_conexao(e):
+            raise
+        print(f"[db] conexao caiu ({str(e).strip()[:80]}); repetindo a leitura")
+        return _ler(query, params, uma)
 
 
 def fetch_one(query: str, params: tuple | list | None = None) -> dict | None:
     """Executa uma query e retorna uma linha como dict (ou None)."""
-    conn = _get_conn()
-    cur = _cursor(conn)
-    adapted = _adapt_query(query)
-    try:
-        if params:
-            cur.execute(adapted, params)
-        else:
-            cur.execute(adapted)
-        row = cur.fetchone()
-        if DB_DRIVER == "postgresql":
-            _put_pg_conn(conn)
-        return _to_dict(row)
-    except Exception:
-        if DB_DRIVER == "postgresql":
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            _put_pg_conn(conn)
-        raise
+    return _to_dict(_ler_com_nova_tentativa(query, params, uma=True))
 
 
 def fetch_all(query: str, params: tuple | list | None = None) -> list[dict]:
     """Executa uma query e retorna todas as linhas como lista de dicts."""
-    conn = _get_conn()
-    cur = _cursor(conn)
-    adapted = _adapt_query(query)
-    try:
-        if params:
-            cur.execute(adapted, params)
-        else:
-            cur.execute(adapted)
-        rows = cur.fetchall()
-        if DB_DRIVER == "postgresql":
-            _put_pg_conn(conn)
-        return _to_dicts(rows)
-    except Exception:
-        if DB_DRIVER == "postgresql":
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            _put_pg_conn(conn)
-        raise
+    return _to_dicts(_ler_com_nova_tentativa(query, params, uma=False))
 
 
 def _schema_para_sqlite(sql: str) -> str:
@@ -239,13 +294,8 @@ def executescript(sql: str) -> None:
         else:
             conn.executescript(sql)
             conn.close()
-    except Exception:
-        if DB_DRIVER == "postgresql":
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            _put_pg_conn(conn)
+    except Exception as e:
+        _falhou(conn, e)
         raise
 
 
@@ -274,13 +324,8 @@ def execute_returning(query: str, params: tuple | list | None = None) -> int | N
             lid = cur.lastrowid
             conn.close()
             return lid
-    except Exception:
-        if DB_DRIVER == "postgresql":
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            _put_pg_conn(conn)
+    except Exception as e:
+        _falhou(conn, e)
         raise
 
 
