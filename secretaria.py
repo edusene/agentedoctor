@@ -154,6 +154,39 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
 
     # ── 3. Confirmação do resumo (seção 18: CONFIRMAÇÃO) ─────────────────────
     if ficha.get("status") == "aguardando_confirmacao" and not midia:
+        # Resposta ao dado que o paciente disse que faltava ou estava errado.
+        ultima_c = ficha.get("ultima_pergunta", "")
+        if ultima_c.startswith("corrigir:"):
+            campo = ultima_c.split(":", 1)[1]
+            anterior = ficha.get(campo)
+            ficha[campo] = ""
+            if fp.capturar_resposta(ficha, campo, texto) and ficha.get(campo):
+                aviso = ficha.pop("aviso_cadastro", "") or ""
+                d.tipos.append(f"corrigido:{campo}")
+                d.partes.append("Anotado.")
+                d.partes.append(fp.resumo(ficha))
+                d.pergunta_final = fp.PERGUNTA_CONFIRMACAO
+                ficha["ultima_pergunta"] = "confirmacao"
+                return fechar()
+            ficha[campo] = anterior
+            aviso = ficha.pop("aviso_cadastro", "") or ""
+            d.tipos.append("corrigir_de_novo")
+            d.partes.append(aviso or fp.PERGUNTAS.get(campo, "Pode me enviar de novo?"))
+            return fechar()
+        # "Não, está faltando meu endereço" / "Adicionar meu endereço": o
+        # campo foi citado sem o valor. Pede o dado em vez de anotar a frase
+        # em Observações (teste do Dr. Fabricio, 12/10).
+        if ultima_c in ("confirmacao", "correcao") and "?" not in texto:
+            campo = fp.campo_citado(texto)
+            copia = dict(ficha)
+            # So quando o valor nao veio: com numero na frase ("o CPF e 123...")
+            # e o caminho normal da correcao, com o aviso de CPF trocado.
+            if (campo and campo in fp.PERGUNTAS and not re.search(r"\d", texto)
+                    and not fp.aplicar_correcao(copia, texto) and not copia.get("aviso_cadastro")):
+                ficha["ultima_pergunta"] = f"corrigir:{campo}"
+                d.tipos.append(f"pedir_campo:{campo}")
+                d.partes.append(fp.PERGUNTAS[campo])
+                return fechar()
         if ficha.get("ultima_pergunta") == "correcao":
             corrigido = fp.aplicar_correcao(ficha, texto)
             aviso = ficha.get("aviso_cadastro", "")
@@ -256,6 +289,10 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
 
     # ── 6. Respostas travadas do documento ────────────────────────────────────
     travadas = clinica.respostas_travadas(texto) if texto else []
+    # Dados do cadastro nao sao duvida: "Endereço completo: ..." disparava a
+    # resposta do endereco do CONSULTORIO (teste do Dr. Fabricio, 12/10).
+    if ultima in fp.CADASTRO and "?" not in texto:
+        travadas = []
     cobre_queixa = False
     for tipo, resposta in travadas:
         d.tipos.append(tipo)

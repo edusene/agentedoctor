@@ -7,6 +7,7 @@ Cada caso vem do documento "Base de Conhecimento — Agente IA | Dr. Fabrício
 Guimarães". Se um teste quebrar, a resposta do agente saiu do documento.
 """
 
+import os
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -321,7 +322,7 @@ class Fluxo(unittest.TestCase):
     def test_resumo_vai_numa_mensagem_so(self):
         _, saidas = conversa(self.CONVERSA)
         blocos = saidas[8][2].split("\n\n")
-        self.assertTrue(any(b.startswith("Confira os dados") and "• Nome: Maria Silva" in b for b in blocos))
+        self.assertTrue(any(b.startswith("Confira os dados") and "• Nome completo: Maria Silva Souza" in b for b in blocos))
 
     def test_resumo_com_resposta_em_varias_linhas(self):
         ficha = fp.nova("1")
@@ -440,7 +441,7 @@ class Fluxo(unittest.TestCase):
     def test_correcao_no_resumo(self):
         ficha, saidas = conversa(self.CONVERSA[:-1] + ["não", "o nome é Maria Silva Souza Lima", "sim"])
         self.assertIn("corrigir", saidas[-3][2])
-        self.assertIn("• Nome: Maria Silva Souza Lima", saidas[-2][2])
+        self.assertIn("• Nome completo: Maria Silva Souza Lima", saidas[-2][2])
         self.assertTrue(saidas[-1][1].encaminhar)
 
     def test_correcao_do_cadastro_no_resumo(self):
@@ -606,6 +607,71 @@ class RespostasForaDoEsperado(unittest.TestCase):
                              "sábado ou quarta")
         finally:
             del os.environ["CLINICA_HORARIO"]
+
+
+class TesteDoDoutor1210(unittest.TestCase):
+    """Teste do Dr. Fabricio em 12/10: "Alguns dados repetidos" e "alguns dados
+    ela deixa passar: não passei o endereço"."""
+
+    COLADO = ("Ótimo, leve no dia da avaliação. Agora vou precisar de alguns dados para fazer o "
+              "seu cadastro. Pode me enviar:\n• Nome completo: Fabiana Lúcia Souza \n"
+              "• Data de nascimento: 15/04/1985\n• CPF: 11144477735\n• RG: 445566\n"
+              "• Endereço completo (rua, número, bairro e cidade)")
+    INICIO = ["Bom dia\nGostaria de agendar uma consulta com o dr Fabricio", "Pedro Augusto",
+              "Perdi um dente e me disseram que preciso colocar um implante e prótese", "Sim"]
+
+    def test_lista_copiada_le_os_dados_e_nao_inventa_endereco(self):
+        d = fp.extrair_cadastro(self.COLADO, "nome_completo")
+        self.assertEqual(d, {"nome_completo": "Fabiana Lúcia Souza", "nascimento": "15/04/1985",
+                             "cpf": "111.444.777-35", "rg": "445566"})
+
+    def test_pede_so_o_endereco_que_faltou(self):
+        os.environ["CLINICA_ENDERECO"] = "Av. Lauro Sodré, 2800"
+        try:
+            ficha, saidas = conversa(self.INICIO + [self.COLADO])
+        finally:
+            del os.environ["CLINICA_ENDERECO"]
+        texto = saidas[-1][2]
+        self.assertNotIn("Lauro Sodré", texto)            # nao responde o endereco do consultorio
+        self.assertNotIn("nome completo", texto.lower())   # o nome ja veio
+        self.assertIn(fp.PERGUNTAS["endereco"], texto)
+        self.assertEqual(ficha["endereco"], "")
+        ficha, saidas = conversa(["Rua Jatuarana, 1500, Nova Floresta, Porto Velho"], ficha)
+        self.assertEqual(ficha["endereco"], "Rua Jatuarana, 1500, Nova Floresta, Porto Velho")
+        self.assertIn("Cadastro completo", saidas[-1][2])
+
+    def test_resumo_sem_nome_repetido_e_detalhe_com_assunto(self):
+        f = fp.nova("1")
+        f.update(nome="Moacyr Tadeu", nome_completo="Moacyr Tadeu", area="ortognatica",
+                 detalhe_area="Já uso")
+        r = fp.resumo(f)
+        self.assertNotIn("• Nome: ", r)
+        self.assertIn("• Nome completo: Moacyr Tadeu", r)
+        self.assertIn("• Aparelho ortodôntico: Já uso", r)
+
+    def test_saude_sem_o_sim_na_frente(self):
+        f = fp.nova("1")
+        fp.capturar_resposta(f, "saude", "Sim\nHipertensão \nUso almesartana")
+        self.assertEqual(f["saude"], "Hipertensão \nUso almesartana")
+
+    def test_faltando_endereco_no_resumo_pede_o_endereco(self):
+        for frases in (["Não\nEstá faltando meu endereço"], ["Não", "Adicionar meu endereço"]):
+            with self.subTest(frases=frases):
+                ficha, saidas = conversa(Fluxo.CONVERSA[:-1] + frases)
+                self.assertEqual(saidas[-1][2], fp.PERGUNTAS["endereco"])
+                ficha, saidas = conversa(["Rua B, 22, Centro, Porto Velho", "sim"], ficha)
+                self.assertEqual(ficha["endereco"], "Rua B, 22, Centro, Porto Velho")
+                self.assertIn("• Endereço: Rua B, 22, Centro, Porto Velho", saidas[0][2])
+                self.assertNotIn("Observações", saidas[0][2])
+                self.assertTrue(saidas[1][1].encaminhar)
+
+    def test_sem_oscilacao(self):
+        msgs = self.INICIO + [self.COLADO, "Rua Jatuarana, 1500, Centro, Porto Velho", "Terça à tarde",
+                              "Primeira consulta", "Sim\nHipertensão", "Não\nEstá faltando meu endereço",
+                              "Rua B, 22, Centro, Porto Velho", "Sim"]
+        primeira = [s[2] for s in conversa(msgs)[1]]
+        for _ in range(10):
+            self.assertEqual([s[2] for s in conversa(msgs)[1]], primeira)
 
 
 if __name__ == "__main__":

@@ -212,16 +212,40 @@ _ORDEM_RESUMO = ["nome", "telefone", "para_quem", "queixa", "detalhe_area", "exa
                  "disponibilidade", "tipo_consulta", "saude"]
 
 
+# "Detalhes: Já uso" nao dizia de que (teste do Dr. Fabricio, 12/10): o rotulo
+# diz o assunto da pergunta da area.
+_ROTULO_DETALHE = {
+    "trauma": "Quando aconteceu / atendimento",
+    "patologia": "Região e sintomas",
+    "biopsia": "Local e evolução",
+    "enxerto": "Implante e região",
+    "exodontia": "Dente e sintomas",
+    "ortognatica": "Aparelho ortodôntico",
+    "mentoplastia": "Incômodo e mordida",
+    "lift_facial": "O que mais incomoda",
+    "lift_cervical": "O que mais incomoda",
+    "papada": "O que mais incomoda",
+}
+
+
 def resumo(ficha: dict) -> str:
     linhas = ["Confira os dados da sua solicitação:"]
+    # Nome e nome completo eram duas linhas com o mesmo nome ("Alguns dados
+    # repetidos", Dr. Fabricio, 12/10): com o nome completo, so ele.
+    tem_nome_completo = ficha.get("nome_completo") not in (None, "", NAO_INFORMADO)
     for campo in _ORDEM_RESUMO:
+        if campo == "nome" and tem_nome_completo:
+            continue
         # Resposta em varias linhas ("Quarta de manha / Quinta a tarde") vira
         # uma linha so: quebrada, ela desmontava a lista do resumo (06/10).
         linhas_valor = [" ".join(l.split()) for l in str(ficha.get(campo) or "").splitlines()]
         valor = " / ".join(l for l in linhas_valor if l)
         if not valor or (campo == "detalhe_area" and not _campo_aplicavel(ficha, campo)):
             continue
-        linhas.append(f"• {ROTULOS[campo]}: {valor}")
+        rotulo = ROTULOS[campo]
+        if campo == "detalhe_area":
+            rotulo = _ROTULO_DETALHE.get(ficha.get("area", ""), rotulo)
+        linhas.append(f"• {rotulo}: {valor}")
     if ficha.get("observacoes"):
         linhas.append(f"• Observações: {ficha['observacoes']}")
     return "\n".join(linhas)
@@ -559,8 +583,12 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         return True
 
     if campo == "saude":
-        ficha["saude"] = ("Nada relatado" if clinica.e_nao(bruto) and len(t.split()) <= 3
-                          else bruto[:300])
+        if clinica.e_nao(bruto) and len(t.split()) <= 3:
+            ficha["saude"] = "Nada relatado"
+        else:
+            # "Sim\nHipertensão": o "sim" so responde a pergunta.
+            sem_sim = re.sub(r"(?i)^\s*sim\b\s*[,.:;!\-]?\s*(?=\S)", "", bruto, count=1)
+            ficha["saude"] = (sem_sim if sem_sim.strip() else bruto)[:300]
         return True
 
     # detalhe_area, tempo_queixa, disponibilidade: texto do paciente como veio.
@@ -592,6 +620,13 @@ _RX_VALOR_CORRIGIDO = re.compile(
     r"(?i)\s(?:é|e|eh|:|seria|correta é|certa é|para|pra|na verdade é|em)\s+(.+)$")
 
 
+def campo_citado(texto: str) -> str:
+    """O campo de que a correcao fala ("esta faltando meu endereco"), ou ""."""
+    t = clinica.normalizar(texto)
+    citados = [c for c, rx in _CAMPOS_CORRIGIVEIS if re.search(rx, t)]
+    return citados[0] if len(citados) == 1 else ""
+
+
 def aplicar_correcao(ficha: dict, texto: str) -> str:
     """Aplica a correcao ao campo citado. Devolve o campo, ou "" se nao achou."""
     t = clinica.normalizar(texto)
@@ -618,6 +653,10 @@ def aplicar_correcao(ficha: dict, texto: str) -> str:
     if not valor:
         return ""
     ficha[campo] = _titulo(valor) if campo in ("nome", "cidade") else valor[:300]
+    # O resumo mostra o nome completo no lugar do nome: corrigir "o nome"
+    # tem de corrigir o que aparece.
+    if campo == "nome" and ficha.get("nome_completo") not in (None, "", NAO_INFORMADO):
+        ficha["nome_completo"] = _titulo(valor)
     return campo
 
 
@@ -646,14 +685,45 @@ def limpar_queixa(texto: str) -> str:
 _RX_CPF = re.compile(r"(?<!\d)(\d{3})[.\s]?(\d{3})[.\s]?(\d{3})[-.\s]?(\d{2})(?!\d)")
 _RX_DATA = re.compile(r"(?<!\d)(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})(?!\d)")
 _RX_ROTULO = re.compile(
-    r"(?im)^\s*(nome(?: completo)?|data de nascimento|nascimento|data nasc\w*|dn|cpf|rg|identidade"
-    r"|endere[cç]o|end\.?)\s*[:=\-]\s*(.+?)\s*$")
+    r"(?im)^[\s•*·\-–]*(nome(?: completo)?|data de nascimento|nascimento|data nasc\w*|dn|cpf|rg|identidade"
+    r"|endere[cç]o(?: completo)?|end\.?)\s*[:=\-]\s*(.+?)\s*$")
 _ROTULO_CAMPO = {
     "nome": "nome_completo", "nome completo": "nome_completo",
     "data de nascimento": "nascimento", "nascimento": "nascimento", "dn": "nascimento",
     "cpf": "cpf", "rg": "rg", "identidade": "rg", "endereco": "endereco", "endereço": "endereco",
-    "end": "endereco", "end.": "endereco",
+    "endereco completo": "endereco", "end": "endereco", "end.": "endereco",
 }
+
+# O paciente copia a mensagem do pedido e preenche por cima (teste do Dr.
+# Fabricio, 12/10): a frase da assistente e o item que ficou sem resposta
+# ("• Endereço completo (rua, número, bairro e cidade)") voltam junto. O item
+# vazio virava o endereco "rua, número, bairro e cidade)" e o cadastro dava
+# como completo sem o endereco.
+_RX_TEXTO_DO_PEDIDO = re.compile(
+    r"(?i)vou precisar de alguns dados|pode me enviar|para completar o seu cadastro|"
+    r"ainda preciso de|leve no dia da avalia|sem problema, isso pode ser visto")
+_PALAVRAS_DO_MODELO = {"rua", "numero", "bairro", "cidade", "e", "completo", "endereco",
+                       "nome", "data", "de", "nascimento", "cpf", "rg"}
+
+
+def _so_modelo(valor: str) -> bool:
+    """O valor e so o texto do pedido (sem dado nenhum do paciente)?"""
+    palavras = re.findall(r"[a-z0-9]+", clinica.normalizar(valor))
+    return not palavras or all(p in _PALAVRAS_DO_MODELO for p in palavras)
+
+
+def _sem_texto_do_pedido(texto: str) -> str:
+    """Tira da mensagem as linhas copiadas do pedido de cadastro."""
+    linhas = []
+    for linha in (texto or "").splitlines():
+        limpa = linha.strip().lstrip("•*·-– ").strip()
+        if not limpa or _RX_TEXTO_DO_PEDIDO.search(limpa):
+            continue
+        # Item sem resposta: o rotulo da lista, sem ":" e sem dado.
+        if ":" not in limpa and _so_modelo(limpa):
+            continue
+        linhas.append(linha)
+    return "\n".join(linhas)
 _RX_ENDERECO = re.compile(
     r"(?i)\b(rua|r\.|av\.?|avenida|travessa|tv\.|alameda|rodovia|estrada|bairro|quadra|qd\.?|lote|"
     r"condom[ií]nio|residencial|setor|n[º°o]\s*\d|numero|número)\b")
@@ -702,11 +772,12 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
     seca a pergunta de um campo so ("12/03/1990") vale para aquele campo.
     """
     achados: dict = {}
-    resto = texto or ""
+    texto = _sem_texto_do_pedido(texto)
+    resto = texto
 
     for rotulo, valor in _RX_ROTULO.findall(resto):
         campo = _ROTULO_CAMPO.get(clinica.normalizar(rotulo).rstrip("."), "")
-        if campo and valor:
+        if campo and valor and not _so_modelo(valor):
             achados[campo] = valor.strip()
     resto = _RX_ROTULO.sub(" ", resto)
 
@@ -749,7 +820,9 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
     if "endereco" not in achados:
         m = _RX_ENDERECO.search(resto)
         if m:
-            achados["endereco"] = " ".join(resto[m.start():].replace("\n", ", ").split()).strip(" ,;.")
+            achado = " ".join(resto[m.start():].replace("\n", ", ").split()).strip(" ,;.")
+            if not _so_modelo(achado):
+                achados["endereco"] = achado
             resto = resto[:m.start()]
     pedacos = [p.strip(" .;-") for p in re.split(r"[\n,;]+", resto) if p.strip(" .;-")]
     if "nome_completo" not in achados:
@@ -768,7 +841,8 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
     # Resposta seca a pergunta de um campo so ("Rua X, 10" sem palavra-chave).
     if campo_esperado and campo_esperado not in achados and not achados.get("_aviso"):
         limpo = (texto or "").strip()
-        if campo_esperado == "endereco" and len(limpo) >= 8 and re.search(r"\d", limpo):
+        if (campo_esperado == "endereco" and len(limpo) >= 8 and re.search(r"\d", limpo)
+                and not _so_modelo(limpo)):
             achados["endereco"] = " ".join(limpo.split())
             # "Rio Madeira, 15": o nome da rua nao e o nome do paciente.
             if not _RX_ROTULO.search(texto or ""):
