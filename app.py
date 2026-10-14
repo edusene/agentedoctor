@@ -835,9 +835,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
             return
 
         contact = database.get_contact(user)
+        retomou = False
         if contact and not contact["auto_mode"]:
-            print(f"[flush] user={user} modo=humano, ignorando agente")
-            return
+            if not _fila_humana(user, items, _chegada):
+                return
+            retomou = True
 
         # ── Palavras-chave de transferencia (antes de tudo) ─────────────────
         matched_kw = _check_transfer_keywords(items)
@@ -913,6 +915,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
             except Exception as e:
                 print(f"[ficha] WARN nao atualizou contato: {e}")
 
+        if retomou and mensagem:
+            mensagem = f"{MENSAGEM_RETOMADA}\n\n{mensagem}"
         if mensagem:
             memory.append(user, "assistant", mensagem)
             enviar_em_blocos(user, mensagem, _chegada)
@@ -936,6 +940,76 @@ def handle_flush(user: str, items: list[dict]) -> None:
         print(f"[flush] ERRO inesperado p/ {user}: {e}")
         import traceback
         traceback.print_exc()
+
+# ── Fila humana sem resposta ─────────────────────────────────────────────────
+# Depois do encaminhamento a conversa vai para a equipe e o agente se cala. Em
+# 06/10 a equipe nao respondeu e o paciente escreveu em 08 e 11/10 sem retorno
+# nenhum (teste do Dr. Fabricio). Agora: um aviso na hora, uma vez; e, se a
+# equipe nao agiu em FILA_RETOMAR_HORAS, o agente volta a atender. Se a equipe
+# ja agiu (mensagem pelo painel, agendamento confirmado/remarcado/cancelado),
+# a conversa e dela e o agente continua calado.
+FILA_RETOMAR_HORAS = float(os.getenv("FILA_RETOMAR_HORAS", "4"))
+MENSAGEM_FILA = ("Sua solicitação já está com a equipe do Dr. Fabrício, que vai te "
+                 "responder por aqui em breve.")
+MENSAGEM_RETOMADA = "Sua solicitação anterior continua com a equipe do Dr. Fabrício."
+# Dados que valem para um novo atendimento: nao se pergunta de novo.
+_FICHA_QUE_FICA = ("nome", "nome_completo", "nascimento", "cpf", "rg", "endereco", "telefone")
+
+
+def _fila_humana(user: str, items: list[dict], chegada: float) -> bool:
+    """Conversa em modo humano. True = o agente retomou e deve responder."""
+    conv = database.get_or_create_conversation(user)
+    transferido = conv.get("transferred_at") or ""
+    if not transferido:
+        # Modo humano ligado a mao pelo painel: a equipe esta com a conversa.
+        print(f"[flush] user={user} modo=humano (sem transferencia), ignorando agente")
+        return False
+    if database.equipe_agiu_desde(conv["id"], user, transferido):
+        print(f"[flush] user={user} modo=humano, equipe ja atendendo")
+        return False
+    try:
+        espera_h = (datetime.utcnow() - datetime.fromisoformat(transferido)).total_seconds() / 3600
+    except ValueError:
+        espera_h = 0.0
+    ficha = ficha_paciente.load(user)
+
+    if espera_h >= FILA_RETOMAR_HORAS:
+        nova = ficha_paciente.nova(user)
+        for campo in _FICHA_QUE_FICA:
+            if ficha.get(campo):
+                nova[campo] = ficha[campo]
+        nova["saudacao_feita"] = True
+        ficha_paciente.save(user, nova)
+        contato = database.get_contact(user)
+        if contato:
+            database.update_contact(contato["id"], auto_mode=1)
+        database.update_conversation(conv["id"], transferred_at=None)
+        database.save_message(
+            conversation_id=conv["id"], phone=user, direction="internal", sender="system",
+            msg_type="system",
+            body=(f"Agente retomou o atendimento em {datetime.utcnow().strftime('%d/%m %H:%M')}: "
+                  f"a equipe nao respondeu em {FILA_RETOMAR_HORAS:g} h"))
+        events.emit("conversation_updated", {"conversation_id": conv["id"], "auto_mode": 1,
+                                             "transferred": False})
+        print(f"[fila] user={user} equipe sem resposta ha {espera_h:.1f} h: agente retomou")
+        return True
+
+    if ficha.get("aviso_fila_para") != transferido:
+        ficha["aviso_fila_para"] = transferido
+        ficha_paciente.save(user, ficha)
+        print(f"[fila] user={user} aguardando a equipe: aviso enviado")
+        _responder_direto(user, items, MENSAGEM_FILA, chegada)
+    else:
+        print(f"[flush] user={user} modo=humano, aviso ja enviado; aguardando a equipe")
+    return False
+
+
+def _responder_direto(user: str, items: list[dict], texto: str,
+                      chegada: float | None = None) -> None:
+    memory.append(user, "user", " ".join(str(it.get("text", "")) for it in items))
+    memory.append(user, "assistant", texto)
+    enviar_em_blocos(user, texto, chegada)
+
 
 def send_msg_out_to_panel(user: str, text: str, status: str = "sent") -> None:
     conv = database.get_or_create_conversation(user)

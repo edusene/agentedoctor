@@ -1428,6 +1428,16 @@ def contar_agendamentos_pendentes() -> int:
     return int((row or {}).get("n") or 0)
 
 
+def equipe_agiu_desde(conv_id: int, phone: str, desde: str) -> bool:
+    """A equipe mexeu no caso depois de `desde` (ISO UTC)? Mensagem enviada pelo
+    painel, ou agendamento do paciente confirmado/remarcado/cancelado."""
+    if db.fetch_one("SELECT 1 AS x FROM messages WHERE conversation_id=? AND sender='human' "
+                    "AND created_at > ? LIMIT 1", (conv_id, desde)):
+        return True
+    return bool(db.fetch_one("SELECT 1 AS x FROM agendamentos WHERE phone=? AND status<>'pendente' "
+                             "AND updated_at > ? LIMIT 1", (phone, desde)))
+
+
 def ids_eventos_google() -> set:
     """Eventos do Google que o painel criou (um por agendamento confirmado)."""
     linhas = db.fetch_all("SELECT google_event_id FROM agendamentos "

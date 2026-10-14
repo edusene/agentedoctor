@@ -420,39 +420,56 @@ def _limites_da_janela() -> tuple[str, str]:
     return (hoje - timedelta(days=95)).isoformat(), (hoje + timedelta(days=400)).isoformat()
 
 
+_releitura = {"pedida": False}
+
+
 def atualizar_janela() -> bool:
-    """Le de novo a janela inteira. True se algo mudou desde a ultima leitura."""
+    """Le de novo a janela inteira. True se algo mudou desde a ultima leitura.
+
+    Pedido no meio de outra leitura nao e descartado: a leitura em andamento
+    pode ter comecado antes da mudanca, entao quem esta lendo le de novo.
+    """
     if not conectado():
         return False
     if not _atualizando.acquire(blocking=False):
-        return False                       # ja tem uma leitura em andamento
+        _releitura["pedida"] = True
+        return False
     try:
-        de, ate = _limites_da_janela()
-        eventos, pagina = [], ""
+        mudou = False
         while True:
-            params = {"timeMin": f"{de}T00:00:00{_offset()}", "timeMax": f"{ate}T00:00:00{_offset()}",
-                      "singleEvents": "true", "orderBy": "startTime", "maxResults": "2500"}
-            if pagina:
-                params["pageToken"] = pagina
-            r = requests.get(f"{_API}/calendars/{_calendario()}/events", params=params,
-                             headers={"Authorization": f"Bearer {_access_token()}"}, timeout=20)
-            if r.status_code != 200:
-                _DIAG["leitura_erro"] = f"{r.status_code} {r.text[:120]}"
-                raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
-            dados = r.json()
-            eventos += [e for e in (_evento_do_google(ev) for ev in dados.get("items") or []
-                                    if ev.get("status") != "cancelled") if e]
-            pagina = dados.get("nextPageToken", "")
-            if not pagina:
-                break
-        _DIAG["leitura_erro"] = ""
-        _DIAG["checagem_em"] = time.time()
-        with _janela_lock:
-            mudou = _JANELA["eventos"] is not None and _JANELA["eventos"] != eventos
-            _JANELA.update(de=de, ate=ate, eventos=eventos, em=time.time())
-        return mudou
+            _releitura["pedida"] = False
+            mudou = _ler_janela() or mudou
+            if not _releitura["pedida"]:
+                return mudou
     finally:
         _atualizando.release()
+
+
+def _ler_janela() -> bool:
+    de, ate = _limites_da_janela()
+    eventos, pagina = [], ""
+    while True:
+        params = {"timeMin": f"{de}T00:00:00{_offset()}", "timeMax": f"{ate}T00:00:00{_offset()}",
+                  "singleEvents": "true", "orderBy": "startTime", "maxResults": "2500"}
+        if pagina:
+            params["pageToken"] = pagina
+        r = requests.get(f"{_API}/calendars/{_calendario()}/events", params=params,
+                         headers={"Authorization": f"Bearer {_access_token()}"}, timeout=20)
+        if r.status_code != 200:
+            _DIAG["leitura_erro"] = f"{r.status_code} {r.text[:120]}"
+            raise RuntimeError(f"Google Calendar: {r.status_code} {r.text[:150]}")
+        dados = r.json()
+        eventos += [e for e in (_evento_do_google(ev) for ev in dados.get("items") or []
+                                if ev.get("status") != "cancelled") if e]
+        pagina = dados.get("nextPageToken", "")
+        if not pagina:
+            break
+    _DIAG["leitura_erro"] = ""
+    _DIAG["checagem_em"] = time.time()
+    with _janela_lock:
+        mudou = _JANELA["eventos"] is not None and _JANELA["eventos"] != eventos
+        _JANELA.update(de=de, ate=ate, eventos=eventos, em=time.time())
+    return mudou
 
 
 def atualizar_janela_em_segundo_plano(depois=None) -> None:

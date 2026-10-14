@@ -30,6 +30,13 @@ o agente registra que há exame e diz que o Dr. Fabrício avalia na consulta.
 Quando o paciente confirma o resumo, o pedido entra como **pendente** na aba
 **Agendamentos** (Confirmação de Agendamento), com a ficha completa, e a
 conversa vai para a **fila humana**. Traumas entram marcados como prioridade.
+
+Na fila humana, se o paciente escrever e a equipe ainda não tiver agido
+(nenhuma mensagem pelo painel, nenhum agendamento confirmado/remarcado/
+cancelado), o agente avisa **uma vez** que a solicitação está com a equipe.
+Passadas `FILA_RETOMAR_HORAS` (padrão 4) sem a equipe agir, o agente volta a
+atender, informa que a solicitação anterior continua com a equipe e não pede
+de novo o cadastro. Com a equipe já atendendo, o agente fica calado.
 Sinais de emergência recebem na hora a orientação de procurar
 pronto-socorro/SAMU (192), e a conversa é transferida.
 
