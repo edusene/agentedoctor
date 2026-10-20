@@ -185,10 +185,10 @@ TRANSFER_KEYWORDS = [
 def _check_transfer_keywords(items: list[dict]) -> str | None:
     """Verifica se alguma mensagem contém palavras-chave de transferência.
     Retorna a keyword encontrada ou None."""
+    # Audio conta pelo que o paciente falou (transcricao), nao pelo marcador.
     full_text = " ".join(
-        item.get("text", "").lower()
+        (item.get("transcricao") or item.get("text") or "").lower()
         for item in items
-        if item.get("text")
     )
     for kw in TRANSFER_KEYWORDS:
         if kw in full_text:
@@ -332,7 +332,10 @@ def _normalize_mime(mime: str) -> str:
 
 
 def _parse_data_uri(data_uri: str) -> tuple[str, str]:
-    m = __import__("re").match(r"^data:([^;,]+);base64,(.+)$", data_uri, __import__("re").DOTALL)
+    # O mime pode trazer parametros: a nota de voz do WhatsApp chega como
+    # "audio/ogg; codecs=opus". Com [^;,]+ o casamento falhava, o mime vinha
+    # vazio e todo audio caia em "nao consegui ouvir".
+    m = __import__("re").match(r"^data:([^,]*?);base64,(.+)$", data_uri, __import__("re").DOTALL)
     if m:
         return m.group(1), m.group(2)
     return "", data_uri
@@ -367,11 +370,12 @@ def transcribe_audio(b64_data: str, mime: str) -> str:
             "audio/webm": "webm", "audio/flac": "flac",
             "audio/x-m4a": "m4a",
         }
+        mime = _normalize_mime(mime)
         ext = ext_map.get(mime, "ogg")
         from llm import _client as _oai
         resp = _oai.audio.transcriptions.create(
             model="whisper-1",
-            file=(f"audio.{ext}", raw, mime.split(";")[0]),
+            file=(f"audio.{ext}", raw, mime),
             language="pt",
             prompt=_vocabulario_do_audio(),
         )
@@ -450,6 +454,10 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                 if legenda:
                     media_desc += f" Legenda: {legenda}"
 
+                if b64 and msg_type in ("audio", "ptt") and _normalize_mime(mime) not in _OPENAI_SUPPORTED_AUDIO:
+                    # Sem mime de audio conhecido (ex.: application/octet-stream):
+                    # audio do WhatsApp e ogg/opus.
+                    mime = "audio/ogg"
                 if mime and b64 and msg_type in ("audio", "ptt") and _normalize_mime(mime) in _OPENAI_SUPPORTED_AUDIO:
                     # Transcreve uma vez por item: handle_flush chama esta
                     # funcao cedo (para a ficha ouvir o audio) e de novo ao
@@ -843,6 +851,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 return
             retomou = True
 
+        # Audio: transcrito aqui, uma vez, para as palavras-chave, a ficha e o
+        # funil lerem o que o paciente falou (e nao "[Audio]"). Fica depois da
+        # fila humana: conversa com a equipe nao gasta transcricao.
+        if any(str(it.get("text", "")).startswith("[Audio") for it in items):
+            _build_user_parts(items)
+
         # ── Palavras-chave de transferencia (antes de tudo) ─────────────────
         matched_kw = _check_transfer_keywords(items)
         if matched_kw:
@@ -854,11 +868,6 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if last_wa_msg_id and last_wa_msg_id.startswith("wamid."):
             threading.Thread(target=_avisar_digitando_async,
                              args=(last_wa_msg_id,), daemon=True).start()
-
-        # Audio: transcrito aqui, uma vez, para a ficha e o funil lerem o que
-        # o paciente falou (e nao "[Audio]").
-        if any(str(it.get("text", "")).startswith("[Audio") for it in items):
-            _build_user_parts(items)
 
         midia = _midia_do_lote(items)
         texto = _texto_do_lote(items)
