@@ -4487,3 +4487,94 @@ select option {
     .agenda-grade.carregando::before { animation: none; opacity: 0.6; width: 100%; }
     .agenda-spinner, .agenda-esqueleto { animation: none !important; }
 }
+
+/* ── Horarios disponiveis ────────────────────────────────────────────────── */
+.hr-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 16px;
+    align-items: start;
+}
+.hr-coluna { display: flex; flex-direction: column; gap: 16px; }
+.hr-titulo { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+.hr-nota { font-size: 12.5px; margin: 6px 0 0; }
+.hr-semana { display: flex; flex-direction: column; }
+.hr-dia {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 9px 0;
+    border-top: 1px solid var(--border);
+}
+.hr-dia:first-child { border-top: 0; }
+.hr-dia.fechado .hr-dia-nome { color: var(--text-muted); }
+.hr-dia-nome { display: flex; align-items: center; gap: 8px; width: 110px; flex-shrink: 0; font-weight: 600; font-size: 13px; cursor: pointer; }
+.hr-faixas { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.hr-faixa { display: inline-flex; align-items: center; gap: 6px; }
+.hr-input {
+    padding: 5px 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 12.5px;
+    outline: none;
+    color-scheme: dark;
+}
+.hr-input:focus { border-color: var(--accent); }
+.hr-remover {
+    background: none;
+    border: 0;
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+}
+.hr-remover:hover { color: var(--danger); }
+.hr-mais {
+    background: none;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--accent-hover);
+    font-size: 12px;
+    padding: 4px 8px;
+    cursor: pointer;
+}
+.hr-mais:hover { border-color: var(--accent); }
+.hr-regras { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 13px; }
+.hr-regras label { display: flex; align-items: center; gap: 8px; }
+.hr-regras .hr-nota { flex-basis: 100%; }
+.hr-bloqueio-novo { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.hr-bloqueio-novo input[type="text"] { flex: 1; min-width: 140px; }
+.hr-bloqueios { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12.5px; }
+.hr-bloqueio {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 4px 4px 10px;
+    background: var(--danger-bg);
+    border-radius: 999px;
+}
+.hr-vagas-card { position: sticky; top: 0; }
+.hr-vagas-topo { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.hr-vagas-topo .hr-titulo { margin-bottom: 0; }
+.hr-vagas { max-height: 70vh; overflow-y: auto; margin-top: 8px; }
+.hr-vaga-dia { padding: 10px 0; border-top: 1px solid var(--border); }
+.hr-vaga-dia:first-of-type { border-top: 0; }
+.hr-vaga-data { font-size: 12.5px; font-weight: 600; margin-bottom: 6px; }
+.hr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.hr-chip {
+    padding: 3px 9px;
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    background: rgba(34, 197, 94, 0.08);
+    color: var(--success);
+    border-radius: 999px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+@media (max-width: 900px) {
+    .hr-layout { grid-template-columns: 1fr; }
+    .hr-vagas-card { position: static; }
+    .hr-dia { flex-direction: column; align-items: flex-start; gap: 6px; }
+}

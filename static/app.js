@@ -168,6 +168,9 @@ function loadView(view) {
             loadAgendamentosPendentes();
             pollTimers.push(setInterval(loadAgendamentosPendentes, 20000));
             break;
+        case 'horarios':
+            loadHorarios();
+            break;
         case 'agenda':
             loadAgendaConfig();
             loadAgenda();
@@ -3577,6 +3580,135 @@ async function salvarDuracaoPadrao(valor) {
     const r = await api('/api/settings/agenda', { method: 'PUT', body: JSON.stringify({ duracao_padrao: Number(valor) }) });
     if (r && r.ok) { agendaDuracaoPadrao = r.duracao_padrao; toast(`Duração padrão: ${duracaoTexto(r.duracao_padrao)}`, 'success'); }
     else toast(friendlyError(r?.error || 'Erro ao salvar'), 'error');
+}
+
+/* ── Horários disponíveis ──────────────────────────────────────────────────── */
+// A equipe define a semana de atendimento; o servidor cruza com a Agenda e o
+// Google e devolve as vagas livres. Ainda não muda nada no fluxo do agente.
+let horariosCfg = null;
+let horariosNomes = [];
+
+async function loadHorarios() {
+    const semana = document.getElementById('hr-semana');
+    if (!horariosCfg) semana.innerHTML = skeletonRows(3);
+    const r = await api('/api/settings/horarios');
+    if (!r || !r.config) { semana.innerHTML = '<div class="empty-state">Não foi possível carregar os horários.</div>'; return; }
+    horariosCfg = r.config;
+    horariosNomes = r.dias || [];
+    document.getElementById('hr-duracao').textContent =
+        `Cada avaliação ocupa ${duracaoTexto(r.duracao_padrao || 60)} (duração padrão, ajustável na aba Agenda).`;
+    renderHorarios();
+    loadVagas();
+}
+
+function hrSelecionar(id, valor) {
+    const sel = document.getElementById(id);
+    if (![...sel.options].some(o => Number(o.value) === valor)) {
+        sel.insertAdjacentHTML('beforeend', `<option value="${valor}">${valor}</option>`);
+    }
+    sel.value = String(valor);
+}
+
+function renderHorarios() {
+    const cfg = horariosCfg;
+    // Segunda a domingo, na ordem do weekday() do Python.
+    document.getElementById('hr-semana').innerHTML = horariosNomes.map((nome, k) => {
+        const faixas = cfg.dias[String(k)] || [];
+        return `
+        <div class="hr-dia ${faixas.length ? '' : 'fechado'}" data-dia="${k}">
+            <label class="hr-dia-nome"><input type="checkbox" ${faixas.length ? 'checked' : ''} onchange="hrAlternarDia(${k}, this.checked)"> ${esc(nome)}</label>
+            <div class="hr-faixas">
+                ${faixas.length ? faixas.map((f, i) => `
+                    <span class="hr-faixa">
+                        <input type="time" class="hr-input" value="${esc(f[0])}" onchange="hrEditar(${k}, ${i}, 0, this.value)">
+                        <span class="muted">às</span>
+                        <input type="time" class="hr-input" value="${esc(f[1])}" onchange="hrEditar(${k}, ${i}, 1, this.value)">
+                        <button class="hr-remover" title="Remover faixa" aria-label="Remover faixa" onclick="hrRemoverFaixa(${k}, ${i})">&times;</button>
+                    </span>`).join('') + `<button class="hr-mais" onclick="hrNovaFaixa(${k})">+ faixa</button>`
+                : '<span class="muted">Não atende</span>'}
+            </div>
+        </div>`;
+    }).join('');
+    hrSelecionar('hr-passo', cfg.passo_min);
+    hrSelecionar('hr-antecedencia', cfg.antecedencia_horas);
+    hrSelecionar('hr-janela', cfg.janela_dias);
+    renderBloqueios();
+}
+
+function hrAlternarDia(k, atende) {
+    horariosCfg.dias[String(k)] = atende ? [['08:00', '12:00'], ['14:00', '18:00']] : [];
+    renderHorarios();
+}
+function hrEditar(k, i, lado, valor) { horariosCfg.dias[String(k)][i][lado] = valor; }
+function hrRemoverFaixa(k, i) { horariosCfg.dias[String(k)].splice(i, 1); renderHorarios(); }
+function hrNovaFaixa(k) {
+    const faixas = horariosCfg.dias[String(k)];
+    const ultima = faixas.length ? faixas[faixas.length - 1][1] : '08:00';
+    const h = Math.min(Number(ultima.slice(0, 2)) + 1, 22);
+    faixas.push([`${pad2(h)}:00`, `${pad2(h + 1)}:00`]);
+    renderHorarios();
+}
+
+function renderBloqueios() {
+    const box = document.getElementById('hr-bloqueios');
+    const lista = horariosCfg.bloqueios || [];
+    box.innerHTML = lista.length ? lista.map((b, i) => {
+        const d = new Date(b.data + 'T12:00');
+        const quando = d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+        return `<span class="hr-bloqueio">${esc(quando)}${b.motivo ? ` · ${esc(b.motivo)}` : ''}
+            <button class="hr-remover" title="Desbloquear" aria-label="Desbloquear" onclick="removerBloqueio(${i})">&times;</button></span>`;
+    }).join('') : '<span class="muted">Nenhum dia bloqueado.</span>';
+}
+
+function adicionarBloqueio() {
+    const data = document.getElementById('hr-bloqueio-data');
+    const motivo = document.getElementById('hr-bloqueio-motivo');
+    if (!data.value) { toast('Escolha a data a bloquear', 'error'); return; }
+    horariosCfg.bloqueios = (horariosCfg.bloqueios || []).filter(b => b.data !== data.value);
+    horariosCfg.bloqueios.push({ data: data.value, motivo: motivo.value.trim() });
+    horariosCfg.bloqueios.sort((a, b) => a.data.localeCompare(b.data));
+    data.value = ''; motivo.value = '';
+    renderBloqueios();
+    toast('Dia bloqueado. Clique em Salvar para valer.', 'info');
+}
+function removerBloqueio(i) { horariosCfg.bloqueios.splice(i, 1); renderBloqueios(); }
+
+async function salvarHorarios() {
+    if (!horariosCfg) return;
+    const corpo = {
+        ...horariosCfg,
+        passo_min: Number(document.getElementById('hr-passo').value),
+        antecedencia_horas: Number(document.getElementById('hr-antecedencia').value),
+        janela_dias: Number(document.getElementById('hr-janela').value),
+    };
+    const btn = document.getElementById('hr-salvar');
+    btn.disabled = true;
+    const r = await api('/api/settings/horarios', { method: 'PUT', body: JSON.stringify(corpo) });
+    btn.disabled = false;
+    if (r && r.ok) {
+        horariosCfg = r.config;
+        renderHorarios();
+        loadVagas();
+        toast('Horários salvos', 'success');
+    } else toast(friendlyError(r?.error || 'Erro ao salvar'), 'error');
+}
+
+async function loadVagas() {
+    const box = document.getElementById('hr-vagas');
+    box.innerHTML = skeletonRows(4);
+    const r = await api('/api/horarios/livres');
+    if (!r || !Array.isArray(r.vagas)) { box.innerHTML = '<div class="empty-state">Não foi possível calcular as vagas.</div>'; return; }
+    const aviso = r.google_erro ? '<p class="muted hr-nota">Google Agenda indisponível agora: as vagas consideram só a Agenda do painel.</p>' : '';
+    if (!r.vagas.length) { box.innerHTML = aviso + '<div class="empty-state">Nenhuma vaga livre no período.</div>'; return; }
+    const total = r.vagas.reduce((n, v) => n + v.horarios.length, 0);
+    box.innerHTML = aviso + `<p class="muted hr-nota">${total} ${total === 1 ? 'vaga livre' : 'vagas livres'} de ${duracaoTexto(r.duracao_min)}.</p>` +
+        r.vagas.map(v => {
+            const d = new Date(v.data + 'T12:00');
+            return `<div class="hr-vaga-dia">
+                <div class="hr-vaga-data">${esc(v.dia)}, ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}</div>
+                <div class="hr-chips">${v.horarios.map(h => `<span class="hr-chip">${esc(h)}</span>`).join('')}</div>
+            </div>`;
+        }).join('');
 }
 
 /* ── Google Calendar ───────────────────────────────────────────────────────── */

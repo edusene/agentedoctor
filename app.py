@@ -13,8 +13,9 @@ import time
 import threading
 import hmac
 import hashlib
+import json
 import re as _re_mod
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -43,6 +44,7 @@ import ficha_paciente
 import secretaria
 import documentos
 import google_agenda
+import horarios
 import scheduler as crm_scheduler
 
 from meta import send_text, mark_read, send_typing, download_media_bytes
@@ -2668,6 +2670,74 @@ def api_set_agenda_settings():
         return jsonify({"error": "A duração deve ficar entre 10 minutos e 8 horas"}), 400
     database.set_setting("agenda_duracao_padrao", str(duracao))
     return jsonify({"ok": True, "duracao_padrao": duracao})
+
+
+# ── Horários de atendimento e vagas livres ───────────────────────────────────
+# Só consulta por enquanto: o agente segue encaminhando o pedido para a equipe
+# confirmar. horarios_livres() fica pronto para quando ele agendar sozinho.
+
+def _config_horarios() -> dict:
+    return horarios.carregar(database.get_setting("agenda_horarios", ""))
+
+
+def _ocupados(de: str, ate: str) -> tuple[list, str]:
+    """Intervalos ocupados no periodo: confirmados do painel + Google. (lista, erro do Google)."""
+    ocupados = []
+    for ag in database.listar_agendamentos(status="confirmado", de=de, ate=ate):
+        try:
+            ini = datetime.fromisoformat(ag["inicio"])
+        except (TypeError, ValueError):
+            continue
+        ocupados.append((ini, ini + timedelta(minutes=int(ag.get("duracao_min") or _DURACAO_PADRAO))))
+    erro = ""
+    if google_agenda.conectado():
+        try:
+            for e in google_agenda.eventos_do_periodo(de, ate, database.ids_eventos_google()):
+                if not e["dia_inteiro"] and e["ocupa"]:
+                    ocupados.append((datetime.fromisoformat(e["inicio"]), datetime.fromisoformat(e["fim"])))
+        except Exception as e:
+            erro = str(e)[:200]
+            print(f"[horarios] WARN Google indisponivel para as vagas: {e}")
+    return ocupados, erro
+
+
+def horarios_livres(de: str = "", ate: str = "") -> tuple[list[dict], str]:
+    """Vagas livres do periodo (padrao: de hoje ate o fim da janela). (vagas, erro do Google)."""
+    cfg = _config_horarios()
+    agora = secretaria.agora().replace(tzinfo=None)
+    try:
+        d_de = date.fromisoformat(de) if de else agora.date()
+        d_ate = date.fromisoformat(ate) if ate else agora.date() + timedelta(days=cfg["janela_dias"] + 1)
+    except ValueError:
+        return [], "Período inválido."
+    ocupados, erro = _ocupados(d_de.isoformat(), d_ate.isoformat())
+    return horarios.vagas(cfg, d_de, d_ate, ocupados, _duracao_padrao(), agora), erro
+
+
+@app.get("/api/settings/horarios")
+@login_required
+def api_get_horarios():
+    return jsonify({"config": _config_horarios(), "dias": horarios.DIAS,
+                    "duracao_padrao": _duracao_padrao()})
+
+
+@app.put("/api/settings/horarios")
+@login_required
+def api_set_horarios():
+    cfg, erro = horarios.normalizar(request.get_json(silent=True) or {})
+    if erro:
+        return jsonify({"error": erro}), 400
+    database.set_setting("agenda_horarios", json.dumps(cfg, ensure_ascii=False))
+    return jsonify({"ok": True, "config": cfg})
+
+
+@app.get("/api/horarios/livres")
+@login_required
+def api_horarios_livres():
+    vagas, erro = horarios_livres(request.args.get("de", ""), request.args.get("ate", ""))
+    if erro == "Período inválido.":
+        return jsonify({"error": erro}), 400
+    return jsonify({"vagas": vagas, "google_erro": erro, "duracao_min": _duracao_padrao()})
 
 
 # ── Google Calendar (opcional) ───────────────────────────────────────────────

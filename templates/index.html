@@ -45,6 +45,10 @@
                     <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="8.01" y2="14"/><line x1="12" y1="14" x2="12.01" y2="14"/><line x1="16" y1="14" x2="16.01" y2="14"/><line x1="8" y1="18" x2="8.01" y2="18"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></span>
                     <span>Agenda</span>
                 </a>
+                <a href="#" class="nav-item" data-view="horarios">
+                    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+                    <span>Horários</span>
+                </a>
                 <a href="#" class="nav-item" data-view="contacts">
                     <span class="icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
                     <span>Contatos</span>
@@ -545,6 +549,66 @@
                             <option value="60">1 hora</option><option value="90">1h30</option><option value="120">2 horas</option>
                         </select>
                     </label>
+                </div>
+            </div>
+
+            <!-- Horarios disponiveis: base para o agente agendar sozinho no futuro -->
+            <div id="view-horarios" class="view">
+                <div class="ag-header">
+                    <div>
+                        <h1>Horários disponíveis</h1>
+                        <p class="muted ag-sub">Dias e horários em que o Dr. Fabrício atende. As vagas livres descontam o que já está na Agenda e no Google. Por enquanto é só referência: o agente continua encaminhando os pedidos para a equipe confirmar.</p>
+                    </div>
+                    <button class="btn-primary btn-sm" id="hr-salvar" onclick="salvarHorarios()">Salvar</button>
+                </div>
+                <div class="hr-layout">
+                    <div class="hr-coluna">
+                        <section class="ag-card">
+                            <h3 class="hr-titulo">Atendimento na semana</h3>
+                            <div id="hr-semana" class="hr-semana"></div>
+                        </section>
+                        <section class="ag-card">
+                            <h3 class="hr-titulo">Regras</h3>
+                            <div class="hr-regras">
+                                <label>Uma vaga a cada
+                                    <select id="hr-passo" class="select-sm">
+                                        <option value="15">15 min</option><option value="20">20 min</option><option value="30">30 min</option>
+                                        <option value="45">45 min</option><option value="60">1 hora</option><option value="90">1h30</option><option value="120">2 horas</option>
+                                    </select>
+                                </label>
+                                <label>Antecedência mínima
+                                    <select id="hr-antecedencia" class="select-sm">
+                                        <option value="0">Nenhuma</option><option value="2">2 horas</option><option value="12">12 horas</option>
+                                        <option value="24">1 dia</option><option value="48">2 dias</option><option value="72">3 dias</option>
+                                    </select>
+                                </label>
+                                <label>Oferecer até
+                                    <select id="hr-janela" class="select-sm">
+                                        <option value="7">7 dias</option><option value="14">14 dias</option><option value="30">30 dias</option>
+                                        <option value="60">60 dias</option><option value="90">90 dias</option>
+                                    </select>
+                                </label>
+                                <p class="muted hr-nota" id="hr-duracao"></p>
+                            </div>
+                        </section>
+                        <section class="ag-card">
+                            <h3 class="hr-titulo">Dias bloqueados</h3>
+                            <p class="muted hr-nota">Feriados, congressos, férias: nenhum horário é oferecido nesses dias.</p>
+                            <div class="hr-bloqueio-novo">
+                                <input type="date" id="hr-bloqueio-data" class="hr-input">
+                                <input type="text" id="hr-bloqueio-motivo" class="hr-input" placeholder="Motivo (opcional)" maxlength="80">
+                                <button class="btn-secondary btn-sm" onclick="adicionarBloqueio()">Bloquear</button>
+                            </div>
+                            <div id="hr-bloqueios" class="hr-bloqueios"></div>
+                        </section>
+                    </div>
+                    <section class="ag-card hr-vagas-card">
+                        <div class="hr-vagas-topo">
+                            <h3 class="hr-titulo">Vagas livres</h3>
+                            <button class="btn-secondary btn-sm" onclick="loadVagas()">Atualizar</button>
+                        </div>
+                        <div id="hr-vagas" class="hr-vagas"></div>
+                    </section>
                 </div>
             </div>
 
