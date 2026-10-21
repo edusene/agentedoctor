@@ -674,5 +674,51 @@ class TesteDoDoutor1210(unittest.TestCase):
             self.assertEqual([s[2] for s in conversa(msgs)[1]], primeira)
 
 
+class TestFichaComBancoFora(unittest.TestCase):
+    """Teste de 21/10: banco oscilando nao pode virar ficha vazia gravada por cima."""
+
+    def setUp(self):
+        import database
+        self.database = database
+        self.originais = (database.get_conversation_state, database.save_conversation_state,
+                          fp._ESPERAS_BANCO)
+        fp._ESPERAS_BANCO = (0,)
+
+    def tearDown(self):
+        (self.database.get_conversation_state, self.database.save_conversation_state,
+         fp._ESPERAS_BANCO) = self.originais
+
+    def _banco_fora(self, *a, **k):
+        raise ConnectionError("Banco ocupado")
+
+    def test_leitura_estrita_sobe_erro(self):
+        self.database.get_conversation_state = self._banco_fora
+        with self.assertRaises(fp.FichaIndisponivel):
+            fp.load("5562999999999", estrito=True)
+
+    def test_gravacao_estrita_sobe_erro(self):
+        self.database.save_conversation_state = self._banco_fora
+        with self.assertRaises(fp.FichaIndisponivel):
+            fp.save("5562999999999", fp.nova("5562999999999"), estrito=True)
+
+    def test_leitura_tenta_de_novo(self):
+        chamadas = []
+        def instavel(phone):
+            chamadas.append(phone)
+            if len(chamadas) == 1:
+                raise ConnectionError("caiu")
+            return {"ficha": {"queixa": "Sou classe iii"}}
+        self.database.get_conversation_state = instavel
+        self.assertEqual(fp.load("5562999999999", estrito=True)["queixa"], "Sou classe iii")
+        self.assertEqual(len(chamadas), 2)
+
+    def test_endereco_com_texto_do_pedido_vale_como_vazio(self):
+        self.database.get_conversation_state = lambda phone: {"ficha": {
+            "endereco": "rua, número, bairro e cidade)", "cpf": "111.444.777-35"}}
+        ficha = fp.load("5562999999999")
+        self.assertEqual(ficha["endereco"], "")
+        self.assertEqual(ficha["cpf"], "111.444.777-35")
+
+
 if __name__ == "__main__":
     unittest.main()

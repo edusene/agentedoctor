@@ -36,6 +36,7 @@ from flask_limiter.util import get_remote_address
 import memory
 import llm
 import database
+import db
 import events
 import meta
 import knowledge_rag
@@ -834,10 +835,33 @@ def _registrar_encaminhamento(user: str, ficha: dict) -> None:
     perform_transfer(user, reason=titulo, send_message=False)
 
 
+# Banco fora no meio do atendimento: o lote volta para a fila e e atendido de
+# novo quando o banco responder (10 s, 20 s, ... ate 60 s; ~15 min no total).
+_REAGENDAR_MAX = 20
+
+
+def _falha_de_banco(e: Exception) -> bool:
+    return isinstance(e, (ficha_paciente.FichaIndisponivel, ConnectionError)) or db._erro_de_conexao(e)
+
+
+def _tentar_de_novo(user: str, items: list[dict], erro: Exception) -> None:
+    tentativa = max((it.get("tentativas", 0) for it in items), default=0) + 1
+    if tentativa > _REAGENDAR_MAX:
+        print(f"[flush] ERRO banco fora ha {_REAGENDAR_MAX} tentativas; desisti de {user}: {erro}")
+        return
+    for it in items:
+        it["tentativas"] = tentativa
+    atraso = min(10 * tentativa, 60)
+    print(f"[flush] banco indisponivel p/ {user} ({str(erro).strip()[:100]}); "
+          f"tentativa {tentativa} em {atraso}s, sem responder antes disso")
+    buffer.reagendar(user, items, atraso)
+
+
 def handle_flush(user: str, items: list[dict]) -> None:
     _chegada = min((it.get("recebido_em") or 0.0) for it in items) if items else 0.0
     if not _chegada:
         _chegada = time.monotonic() - BUFFER_SECONDS
+    respondeu = False
     try:
         global_mode = int(database.get_setting("agent_mode", "1"))
         if not global_mode:
@@ -861,6 +885,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         matched_kw = _check_transfer_keywords(items)
         if matched_kw:
             print(f"[flush] user={user} keyword de transferência detectada: '{matched_kw}'")
+            respondeu = True
             perform_transfer(user, reason=f"paciente mencionou '{matched_kw}'")
             return
 
@@ -876,17 +901,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
             midia = "audio_falhou"
         print(f"[flush] user={user} texto={texto[:120]!r} midia={midia or '-'}")
 
-        ficha = ficha_paciente.load(user)
+        ficha = ficha_paciente.load(user, estrito=True)
         decisao = secretaria.decidir(ficha, texto, secretaria.agora(), midia=midia)
         print(f"[secretaria] user={user} decisao={decisao.tipos} "
               f"llm={decisao.usar_llm} proxima={ficha.get('ultima_pergunta')!r}")
-
-        # O historico guarda TEXTO: imagem de exame nunca vai ao modelo.
-        memory.append(user, "user", texto or {
-            "video": "[paciente enviou um video]",
-            "arquivo": "[paciente enviou um arquivo/exame]",
-            "audio_falhou": "[paciente enviou um audio que nao foi transcrito]",
-        }.get(midia, "[mensagem sem texto]"))
 
         texto_modelo = ""
         chave_cache = _chave_resposta_aberta(texto) if decisao.usar_llm else ""
@@ -919,7 +937,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
             print(f"[trava] user={user} resposta do modelo BARRADA {violacoes}: "
                   f"{texto_modelo[:160]!r}")
 
-        ficha_paciente.save(user, ficha)
+        # Gravada ANTES de responder: se o banco nao aceitar, o paciente nao
+        # recebe uma resposta que a ficha nao lembra (21/10).
+        ficha_paciente.save(user, ficha, estrito=True)
+        # O historico guarda TEXTO: imagem de exame nunca vai ao modelo.
+        memory.append(user, "user", texto or {
+            "video": "[paciente enviou um video]",
+            "arquivo": "[paciente enviou um arquivo/exame]",
+            "audio_falhou": "[paciente enviou um audio que nao foi transcrito]",
+        }.get(midia, "[mensagem sem texto]"))
         if ficha.get("nome") and (not contact or contact.get("name") != ficha["nome"]):
             try:
                 database.upsert_contact(user, name=ficha["nome"])
@@ -928,6 +954,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
 
         if retomou and mensagem:
             mensagem = f"{MENSAGEM_RETOMADA}\n\n{mensagem}"
+        respondeu = True
         if mensagem:
             memory.append(user, "assistant", mensagem)
             enviar_em_blocos(user, mensagem, _chegada)
@@ -948,6 +975,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
         except Exception as e:
             print(f"[flush] WARN reset_unread falhou p/ {user}: {e}")
     except Exception as e:
+        if not respondeu and _falha_de_banco(e):
+            _tentar_de_novo(user, items, e)
+            return
         print(f"[flush] ERRO inesperado p/ {user}: {e}")
         import traceback
         traceback.print_exc()
@@ -982,7 +1012,7 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> bool:
         espera_h = (datetime.utcnow() - datetime.fromisoformat(transferido)).total_seconds() / 3600
     except ValueError:
         espera_h = 0.0
-    ficha = ficha_paciente.load(user)
+    ficha = ficha_paciente.load(user, estrito=True)
 
     if espera_h >= FILA_RETOMAR_HORAS:
         nova = ficha_paciente.nova(user)
@@ -990,7 +1020,7 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> bool:
             if ficha.get(campo):
                 nova[campo] = ficha[campo]
         nova["saudacao_feita"] = True
-        ficha_paciente.save(user, nova)
+        ficha_paciente.save(user, nova, estrito=True)
         contato = database.get_contact(user)
         if contato:
             database.update_contact(contato["id"], auto_mode=1)
@@ -1007,7 +1037,7 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> bool:
 
     if ficha.get("aviso_fila_para") != transferido:
         ficha["aviso_fila_para"] = transferido
-        ficha_paciente.save(user, ficha)
+        ficha_paciente.save(user, ficha, estrito=True)
         print(f"[fila] user={user} aguardando a equipe: aviso enviado")
         _responder_direto(user, items, MENSAGEM_FILA, chegada)
     else:
@@ -1131,6 +1161,32 @@ def _fetch_and_store_media(m: dict) -> str:
         data_uri = f"data:{mime};base64,{b64}"
         database.update_message_media(msg_id, data_uri)
         return data_uri
+
+
+# ── Reentrega da Meta: lembrada na memoria tambem ───────────────────────────
+# A deduplicacao pelo banco (save_message) falha justo quando o banco esta
+# fora - e e quando o ack demora que a Meta reentrega. Em 21/10 uma mensagem
+# reentregue foi atendida duas vezes e o funil inteiro ficou uma pergunta
+# atrasado. A memoria do processo cobre esse buraco.
+_WAMID_TTL_SEG = 6 * 3600
+_wamids_vistos: dict[str, float] = {}
+_wamids_lock = threading.Lock()
+
+
+def _primeira_entrega(wamid: str) -> bool:
+    """Registra o wamid. False se ele ja chegou nas ultimas horas."""
+    if not wamid:
+        return True
+    agora = time.monotonic()
+    with _wamids_lock:
+        if len(_wamids_vistos) > 5000:
+            for k in [k for k, t in _wamids_vistos.items() if agora - t > _WAMID_TTL_SEG]:
+                del _wamids_vistos[k]
+        visto = _wamids_vistos.get(wamid)
+        if visto is not None and agora - visto <= _WAMID_TTL_SEG:
+            return False
+        _wamids_vistos[wamid] = agora
+        return True
 
 
 # ── Mapeamento de tipos de midia ─────────────────────────────────────────────
@@ -1345,6 +1401,9 @@ def webhook():
 
             _chegou_em = time.monotonic()
             print(f"[webhook] from={number} ({push_name}) type={msg_type} len={len(body)} msg_id={message_id[:30]}")
+            if not _primeira_entrega(str(message_id)):
+                print(f"[webhook] REENTREGA ignorada (memoria) wamid={message_id} from={number}")
+                continue
 
             # Marca como lido em background. E uma chamada de rede a Datafy
             # (0,9s medido em producao) cujo resultado ninguem espera: o tique
@@ -1360,18 +1419,28 @@ def webhook():
                 contact_kwargs["name"] = push_name
             if profile_picture_url:
                 contact_kwargs["avatar_url"] = profile_picture_url
-            contact = database.upsert_contact(number, **contact_kwargs)
-            conv = database.get_or_create_conversation(number)
-            saved = database.save_message(
-                conversation_id=conv["id"],
-                phone=number,
-                direction="in",
-                body=body,
-                sender="user",
-                msg_type=str(msg_type) if msg_type else "text",
-                wa_message_id=str(message_id) if message_id else None,
-                wa_media_id=wa_media_id,
-            )
+            # Banco fora: a mensagem segue para o atendimento mesmo sem ficar
+            # gravada no painel. Antes o webhook caia com erro 500 e a Meta so
+            # reentregava minutos depois - 15 min de silencio em 21/10.
+            _banco_fora = False
+            try:
+                contact = database.upsert_contact(number, **contact_kwargs)
+                conv = database.get_or_create_conversation(number)
+                saved = database.save_message(
+                    conversation_id=conv["id"],
+                    phone=number,
+                    direction="in",
+                    body=body,
+                    sender="user",
+                    msg_type=str(msg_type) if msg_type else "text",
+                    wa_message_id=str(message_id) if message_id else None,
+                    wa_media_id=wa_media_id,
+                )
+            except Exception as e:
+                print(f"[webhook] ERRO banco ao gravar mensagem de {number}: {e}; "
+                      f"segue para o atendimento sem gravar")
+                contact = conv = saved = None
+                _banco_fora = True
             # A Meta REENTREGA o mesmo wamid quando o ack demora — foi assim
             # que um unico "#RESET" do dono virou dois resets no banco, com
             # 51 segundos de diferenca (24/09, 02:42:21 e 02:43:02). Ali foi
@@ -1382,7 +1451,7 @@ def webhook():
             # gravar. So o primeiro pode ser descartado — descartar o segundo
             # seria deixar um cliente sem resposta por causa de um erro nosso.
             _ja_processada = False
-            if saved is None and message_id:
+            if saved is None and message_id and not _banco_fora:
                 _ja_processada = database.mensagem_ja_recebida(str(message_id))
                 if _ja_processada:
                     print(f"[webhook] REENTREGA ignorada wamid={message_id} "

@@ -10,6 +10,7 @@ que já está preenchido é perguntado de novo.
 from __future__ import annotations
 
 import re
+import time
 from datetime import datetime
 
 import clinica
@@ -106,20 +107,59 @@ def nova(phone: str = "") -> dict:
 
 # ── Persistência ─────────────────────────────────────────────────────────────
 
-def load(phone: str) -> dict:
+class FichaIndisponivel(Exception):
+    """O banco nao respondeu: a ficha nao pode ser lida ou gravada agora."""
+
+
+# Teste do Dr. Fabricio, 21/10: o banco oscilou e load() devolveu uma ficha
+# VAZIA no lugar do erro. O agente cumprimentou de novo, perguntou o que ja
+# sabia e o save() seguinte gravou a ficha vazia por cima da verdadeira. No
+# atendimento (estrito=True) a falha agora tenta de novo e, se o banco nao
+# voltar, sobe FichaIndisponivel: melhor responder depois do que errado.
+_ESPERAS_BANCO = (0.5, 1.5, 3.0)
+
+
+def _com_novas_tentativas(acao, oque: str, phone: str):
+    for espera in (*_ESPERAS_BANCO, None):
+        try:
+            return acao()
+        except Exception as e:
+            if espera is None:
+                raise FichaIndisponivel(f"{oque} de {phone}: {e}") from e
+            print(f"[ficha] WARN {oque} de {phone} falhou ({str(e).strip()[:80]}); "
+                  f"nova tentativa em {espera}s")
+            time.sleep(espera)
+
+
+def load(phone: str, estrito: bool = False) -> dict:
     ficha = nova(phone)
     try:
-        salvo = database.get_conversation_state(phone) or {}
+        if estrito:
+            salvo = _com_novas_tentativas(
+                lambda: database.get_conversation_state(phone), "leitura da ficha", phone) or {}
+        else:
+            salvo = database.get_conversation_state(phone) or {}
         if isinstance(salvo.get("ficha"), dict):
             ficha.update(salvo["ficha"])
+    except FichaIndisponivel:
+        raise
     except Exception as e:
         print(f"[ficha] WARN nao leu ficha de {phone}: {e}")
     ficha["telefone"] = ficha.get("telefone") or phone
+    # Ficha gravada antes da trava de 14/10 pode ter o texto do pedido como
+    # dado ("Endereço: rua, número, bairro e cidade)"): vale como vazio.
+    for campo in CADASTRO:
+        if ficha.get(campo) and _so_modelo(str(ficha[campo])):
+            ficha[campo] = ""
     return ficha
 
 
-def save(phone: str, ficha: dict) -> None:
+def save(phone: str, ficha: dict, estrito: bool = False) -> None:
     ficha["atualizado_em"] = datetime.utcnow().isoformat()
+    if estrito:
+        _com_novas_tentativas(
+            lambda: database.save_conversation_state(phone, {"ficha": ficha}), "gravacao da ficha", phone)
+        return
     try:
         database.save_conversation_state(phone, {"ficha": ficha})
     except Exception as e:

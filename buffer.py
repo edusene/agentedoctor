@@ -47,6 +47,20 @@ class MessageBuffer:
             self._state[user]["timer"] = new_timer
             new_timer.start()
 
+    def reagendar(self, user: str, items: list[dict], atraso: float) -> None:
+        """Devolve o lote a fila e atende de novo daqui a `atraso` s (banco fora).
+
+        O que chegar nesse meio tempo entra junto, depois do lote devolvido.
+        """
+        with self._lock:
+            estado = self._state.setdefault(user, {"items": [], "timer": None})
+            estado["items"] = items + estado["items"]
+            if estado["timer"] is not None:
+                estado["timer"].cancel()
+            timer = threading.Timer(atraso, self._flush, args=[user])
+            estado["timer"] = timer
+            timer.start()
+
     def _flush(self, user: str) -> None:
         with self._lock:
             if user not in self._state:
