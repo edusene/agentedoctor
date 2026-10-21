@@ -3716,19 +3716,31 @@ function renderGoogleStatus(g) {
     const box = document.getElementById('agenda-google');
     if (!box) return;
     if (!g.configurado) {
-        box.innerHTML = `<span class="muted">Google Calendar não configurado: a agenda fica só no painel.
-            Para sincronizar, cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no Render.</span>`;
+        box.innerHTML = `<span class="muted google-chip-off" title="Para sincronizar, cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no Render.">Google Agenda: não configurado</span>`;
     } else if (!g.conectado) {
-        box.innerHTML = `<span class="muted">A agenda está só no painel.</span>
-            <a class="btn-primary btn-sm" href="/api/google/conectar">Conectar Google Calendar</a>`;
+        box.innerHTML = `<a class="btn-secondary btn-sm" href="/api/google/conectar">Conectar Google Agenda</a>`;
     } else {
-        box.innerHTML = `<span class="agenda-google-ok">● Sincronizado com o Google Calendar${g.email ? ` (${esc(g.email)})` : ''}</span>
-            <span class="muted agenda-legenda"><i class="leg-painel"></i>avaliações do painel <i class="leg-google"></i>marcados no Google</span>
-            ${statusAtualizacaoGoogle(g.atualizacao || {})}
-            <button class="btn-secondary btn-sm" onclick="sincronizarGoogle()">Sincronizar agora</button>
-            <button class="btn-secondary btn-sm" onclick="desconectarGoogle()">Desconectar</button>`;
+        // So um selo: os detalhes abrem no clique, para nao poluir a Agenda.
+        const a = g.atualizacao || {};
+        box.innerHTML = `<details class="google-chip ${a.leitura_erro ? 'erro' : ''}">
+            <summary title="Google Agenda conectado">${a.leitura_erro ? '⚠' : '<i class="google-chip-ponto"></i>'} Google Agenda</summary>
+            <div class="google-pop">
+                <div class="google-pop-conta">Sincronizado${g.email ? ` com <strong>${esc(g.email)}</strong>` : ''}</div>
+                ${statusAtualizacaoGoogle(a)}
+                <div class="muted agenda-legenda"><i class="leg-painel"></i>avaliações do painel <i class="leg-google"></i>marcados no Google</div>
+                <div class="google-pop-acoes">
+                    <button class="btn-secondary btn-sm" onclick="sincronizarGoogle()">Sincronizar agora</button>
+                    <button class="btn-secondary btn-sm" onclick="desconectarGoogle()">Desconectar</button>
+                </div>
+            </div>
+        </details>`;
     }
 }
+
+// Clique fora fecha os detalhes do Google.
+document.addEventListener('click', e => {
+    document.querySelectorAll('.google-chip[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
+});
 
 // O que o Google marcar aparece sozinho? Mostra o motivo quando nao.
 function statusAtualizacaoGoogle(a) {

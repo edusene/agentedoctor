@@ -4309,14 +4309,45 @@ select option {
     transition: color 0.2s ease;
 }
 .agenda-modo button.active { color: #fff; }
-.agenda-google {
-    display: flex;
+.agenda-google { display: flex; align-items: center; font-size: 13px; }
+.google-chip { position: relative; }
+.google-chip > summary {
+    list-style: none;
+    display: inline-flex;
     align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    font-size: 13px;
-    margin-bottom: 12px;
+    gap: 6px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12.5px;
+    color: var(--text);
+    cursor: pointer;
+    user-select: none;
+    transition: border-color var(--transition-fast);
 }
+.google-chip > summary::-webkit-details-marker { display: none; }
+.google-chip > summary:hover, .google-chip[open] > summary { border-color: var(--accent); }
+.google-chip.erro > summary { border-color: rgba(239, 68, 68, 0.5); color: #fca5a5; }
+.google-chip-ponto { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.google-chip-off { font-size: 12px; cursor: help; }
+.google-pop {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 20;
+    width: max-content;
+    max-width: min(340px, calc(100vw - 32px));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    background: #111a2b;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+}
+.google-pop-conta { font-size: 13px; overflow-wrap: anywhere; }
+.google-pop-acoes { display: flex; gap: 8px; margin-top: 2px; }
 .agenda-google-ok { color: var(--success); font-weight: 600; }
 .agenda-grade {
     background: var(--bg-card);
@@ -4455,7 +4486,7 @@ select option {
 }
 @keyframes agendaGira { to { transform: rotate(360deg); } }
 .agenda-grade.carregando .agenda-corpo { opacity: 0.85; }
-.agenda-google-esqueleto { display: inline-block; width: 320px; max-width: 70%; height: 14px; }
+.agenda-google-esqueleto { display: inline-block; width: 110px; height: 26px; border-radius: 999px; }
 .btn-sm.trabalhando { opacity: 0.75; cursor: progress; }
 
 .agenda-dia { transition: background 0.15s ease; }
@@ -4577,4 +4608,7 @@ select option {
     .hr-layout { grid-template-columns: 1fr; }
     .hr-vagas-card { position: static; }
     .hr-dia { flex-direction: column; align-items: flex-start; gap: 6px; }
+}
+@media (max-width: 600px) {
+    .google-pop { right: auto; left: 0; }
 }
