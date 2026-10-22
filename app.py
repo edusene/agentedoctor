@@ -60,8 +60,18 @@ from auth import login_required, do_login, do_logout
 # 0 = responde na hora; o que chegar durante a resposta entra no proximo lote.
 BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "0"))
 PORT = int(os.getenv("PORT", "5000"))
-SECRET_KEY = os.getenv("SECRET_KEY", "troque_esta_chave_secreta_aleatoria")
+# Sem chave padrao: com o codigo publico, uma chave escrita aqui deixaria
+# qualquer um forjar o cookie de sessao do painel. Sem SECRET_KEY, sorteia uma
+# a cada inicio (seguro; so obriga a logar de novo depois de cada deploy).
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if SECRET_KEY in ("", "troque_esta_chave_secreta_aleatoria"):
+    import secrets as _secrets
+    SECRET_KEY = _secrets.token_hex(32)
+    print("[auth] AVISO: SECRET_KEY nao definida; usando chave aleatoria (sessoes caem a cada deploy)")
 DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
+# Com o segredo definido, pedido sem assinatura e recusado. "0" volta ao
+# comportamento antigo (aceita sem assinatura) sem precisar de deploy.
+WEBHOOK_EXIGE_ASSINATURA = os.getenv("WEBHOOK_EXIGE_ASSINATURA", "1") != "0"
 
 _DIR = Path(__file__).parent
 PROMPT_PATH = _DIR / "prompts" / "secretaria.md"
@@ -1343,6 +1353,13 @@ def webhook():
     signature = request.headers.get("x-datafy-signature-256", "")
     timestamp = request.headers.get("x-datafy-timestamp", "")
     raw_body = request.get_data(as_text=True)
+
+    # Antes, pedido SEM assinatura pulava a checagem: qualquer um podia se
+    # passar por paciente e fazer o bot mandar mensagem pelo numero do consultorio.
+    if (DATAFY_WEBHOOK_SECRET and WEBHOOK_EXIGE_ASSINATURA
+            and not (signature and timestamp)):
+        print("[webhook] Recusado: pedido sem assinatura (Datafy)")
+        return "Forbidden", 401
 
     if DATAFY_WEBHOOK_SECRET and signature and timestamp:
         expected = "sha256=" + hmac.new(

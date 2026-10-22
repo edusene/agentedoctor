@@ -46,3 +46,6 @@ Audio*.txt
 
 # Material de teste enviado pelo cliente (audio, prints, conversa)
 Corre*Solicitadas/
+
+# Material original do cliente (o agente usa so knowledge/*.md)
+/*.pdf
