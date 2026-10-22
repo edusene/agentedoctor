@@ -57,7 +57,7 @@ from auth import login_required, do_login, do_logout
 
 # ── Config ──────────────────────────────────────────────────────────────────
 # Janela de debounce: tempo de silencio do paciente antes de o agente responder.
-BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "3"))
+BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "2"))
 PORT = int(os.getenv("PORT", "5000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "troque_esta_chave_secreta_aleatoria")
 DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
@@ -689,18 +689,17 @@ def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> N
 # Ritmo de digitacao entre as mensagens divididas por split_reply.
 # Antes toda mensagem esperava 1 + len/200 segundos, inclusive a PRIMEIRA: o
 # cliente ja tinha esperado o debounce e o modelo, e ainda levava mais ~2s para
-# ver a primeira linha. Agora a primeira sai quase imediata e so as seguintes
-# tem a pausa curta que imita digitacao.
-PAUSA_PRIMEIRA = float(os.getenv("PAUSA_PRIMEIRA_SEG", "0.4"))
-PAUSA_MIN = float(os.getenv("PAUSA_MIN_SEG", "0.8"))
-PAUSA_MAX = float(os.getenv("PAUSA_MAX_SEG", "2.0"))
+# ver a primeira linha. Agora a primeira sai na hora e as seguintes so tem a
+# pausa minima para chegarem na ordem e legiveis (pedido do doutor: o mais
+# rapido possivel).
+PAUSA_PRIMEIRA = float(os.getenv("PAUSA_PRIMEIRA_SEG", "0"))
+PAUSA_MIN = float(os.getenv("PAUSA_MIN_SEG", "0.4"))
+PAUSA_MAX = float(os.getenv("PAUSA_MAX_SEG", "1.0"))
 
-# Piso do tempo de resposta: o agente responde entre 5 e 10
-# segundos. O teto sai do debounce curto e do ritmo acima; o piso existe porque
-# resposta pronta e curta saia em ~4s, e resposta instantanea entrega que do
-# outro lado nao tem ninguem digitando. Conta do ponto de vista do cliente,
-# entao o debounce ja consumido entra na conta.
-RESPOSTA_MIN_SEG = float(os.getenv("RESPOSTA_MIN_SEG", "5.0"))
+# Piso do tempo de resposta. Era 5 s para nao parecer robo; o doutor pediu
+# resposta o mais rapida possivel, entao fica desligado (0). Volta pela
+# variavel de ambiente se um dia quiserem o atraso de novo.
+RESPOSTA_MIN_SEG = float(os.getenv("RESPOSTA_MIN_SEG", "0"))
 
 
 def _pausa_digitacao(indice: int, chunk: str) -> float:
@@ -731,6 +730,7 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
     ele a primeira mensagem respeita o piso de RESPOSTA_MIN_SEG.
     """
     chunks = split_reply(texto) or ([texto] if texto else [])
+    enviados = []
     for indice, chunk in enumerate(chunks):
         pausa = _pausa_digitacao(indice, chunk)
         if pausa > 0:
@@ -742,9 +742,23 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
             print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
             # Fica no painel marcada com erro: a equipe ve que o paciente
             # nao recebeu, em vez de a resposta sumir sem rastro.
-            send_msg_out_to_panel(user, chunk, status="error")
+            enviados.append((chunk, "error"))
             continue
-        send_msg_out_to_panel(user, chunk)
+        enviados.append((chunk, "sent"))
+    # O espelho no painel sao ~5 idas ao banco por mensagem. Antes corria entre
+    # uma mensagem e outra e o paciente esperava por ele; agora vai depois, em
+    # segundo plano, na mesma ordem.
+    if enviados:
+        threading.Thread(target=_espelhar_no_painel, args=(user, enviados),
+                         daemon=True).start()
+
+
+def _espelhar_no_painel(user: str, enviados: list[tuple[str, str]]) -> None:
+    for chunk, status in enviados:
+        try:
+            send_msg_out_to_panel(user, chunk, status=status)
+        except Exception as e:
+            print(f"[painel] WARN nao espelhou resposta p/ {user}: {e}")
 
 
 # Falha passageira da Datafy (rede, timeout, 429, 5xx): tenta de novo antes de
@@ -940,24 +954,28 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # Gravada ANTES de responder: se o banco nao aceitar, o paciente nao
         # recebe uma resposta que a ficha nao lembra (21/10).
         ficha_paciente.save(user, ficha, estrito=True)
+
+        if retomou and mensagem:
+            mensagem = f"{MENSAGEM_RETOMADA}\n\n{mensagem}"
+        respondeu = True
+        if mensagem:
+            enviar_em_blocos(user, mensagem, _chegada)
+
+        # Historico e nome do contato depois do envio: nao mudam a resposta e
+        # eram idas ao banco que o paciente esperava.
         # O historico guarda TEXTO: imagem de exame nunca vai ao modelo.
         memory.append(user, "user", texto or {
             "video": "[paciente enviou um video]",
             "arquivo": "[paciente enviou um arquivo/exame]",
             "audio_falhou": "[paciente enviou um audio que nao foi transcrito]",
         }.get(midia, "[mensagem sem texto]"))
+        if mensagem:
+            memory.append(user, "assistant", mensagem)
         if ficha.get("nome") and (not contact or contact.get("name") != ficha["nome"]):
             try:
                 database.upsert_contact(user, name=ficha["nome"])
             except Exception as e:
                 print(f"[ficha] WARN nao atualizou contato: {e}")
-
-        if retomou and mensagem:
-            mensagem = f"{MENSAGEM_RETOMADA}\n\n{mensagem}"
-        respondeu = True
-        if mensagem:
-            memory.append(user, "assistant", mensagem)
-            enviar_em_blocos(user, mensagem, _chegada)
 
         if decisao.transferir:
             perform_transfer(user, reason=decisao.transferir, send_message=False)
