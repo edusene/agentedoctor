@@ -1,6 +1,8 @@
 """
 buffer.py — Debounce buffer por usuario.
 Cada mensagem nova reseta o timer; flush so ocorre apos BUFFER_SECONDS de silencio.
+Com BUFFER_SECONDS=0 a resposta sai na hora, e o que o paciente mandar enquanto
+ela e gerada vira um lote so, atendido logo depois.
 """
 
 import threading
@@ -63,16 +65,18 @@ class MessageBuffer:
 
     def _flush(self, user: str) -> None:
         with self._lock:
-            if user not in self._state:
-                return
-            items = self._state[user]["items"]
-            if not items:
-                return
-            # Limpa estado antes de chamar o callback (evita race condition)
-            self._state[user] = {"items": [], "timer": None}
-
-        with self._lock:
             vez = self._em_atendimento.setdefault(user, threading.Lock())
+        # Pega o lote so depois de ganhar a vez: o que chegou enquanto o
+        # atendimento anterior rodava sai junto, em uma resposta. Os timers
+        # dessas mensagens acham a fila vazia e voltam sem fazer nada.
         with vez:
+            with self._lock:
+                if user not in self._state:
+                    return
+                items = self._state[user]["items"]
+                if not items:
+                    return
+                # Limpa estado antes de chamar o callback (evita race condition)
+                self._state[user] = {"items": [], "timer": None}
             print(f"[buffer] flush user={user} msgs={len(items)}")
             self._on_flush(user, items)

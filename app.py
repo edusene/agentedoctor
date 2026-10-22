@@ -57,7 +57,8 @@ from auth import login_required, do_login, do_logout
 
 # ── Config ──────────────────────────────────────────────────────────────────
 # Janela de debounce: tempo de silencio do paciente antes de o agente responder.
-BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "2"))
+# 0 = responde na hora; o que chegar durante a resposta entra no proximo lote.
+BUFFER_SECONDS = float(os.getenv("BUFFER_SECONDS", "0"))
 PORT = int(os.getenv("PORT", "5000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "troque_esta_chave_secreta_aleatoria")
 DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
