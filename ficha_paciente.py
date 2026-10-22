@@ -22,12 +22,13 @@ import database
 # cirurgiao pergunta na consulta e a cidade vem no endereco do cadastro. Se o
 # paciente contar por conta propria, a ficha ainda guarda (CAMPOS_EXTRAS).
 # "telefone" vem do proprio WhatsApp e nunca e perguntado.
-CADASTRO = ["nome_completo", "nascimento", "cpf", "rg", "endereco"]
-ORDEM = [
-    "nome", "queixa", "detalhe_area", "exames", *CADASTRO,
-    "disponibilidade", "tipo_consulta", "saude",
-]
-CAMPOS_EXTRAS = ["avaliacao_previa", "tempo_queixa", "cidade"]
+# Roteiro do doutor (23/10): nome -> queixa -> pre-cadastro (com e-mail e CEP)
+# -> dias e horarios -> saude. Detalhes da area, exames e primeira/retorno
+# sairam do funil; o que o paciente contar sozinho a ficha ainda guarda.
+CADASTRO = ["nome_completo", "nascimento", "cpf", "rg", "email", "endereco", "cep"]
+ORDEM = ["nome", "queixa", *CADASTRO, "disponibilidade", "saude"]
+CAMPOS_EXTRAS = ["avaliacao_previa", "tempo_queixa", "cidade", "detalhe_area", "exames",
+                 "tipo_consulta"]
 
 ROTULOS = {
     "nome": "Nome",
@@ -35,7 +36,9 @@ ROTULOS = {
     "nascimento": "Data de nascimento",
     "cpf": "CPF",
     "rg": "RG",
+    "email": "E-mail",
     "endereco": "Endereço",
+    "cep": "CEP",
     "telefone": "Telefone",
     "queixa": "Queixa principal",
     "detalhe_area": "Detalhes",
@@ -51,25 +54,30 @@ ROTULOS = {
 
 PERGUNTAS = {
     # Textos curtos de proposito: o Dr. Fabricio pediu menos texto (07/10).
-    "nome": "Qual é o seu nome?",
-    "queixa": "Qual é a sua principal queixa ou o que você gostaria de tratar?",
+    # Roteiro do doutor (23/10), texto dele.
+    "nome": "Qual o seu nome e em que posso ajudar?",
+    "queixa": ("Poderia me adiantar qual seria o motivo da sua consulta? Qual seria a sua "
+               "queixa (reclamação)?"),
     "exames": "Você tem exames (radiografia, tomografia, laudo) ou algum encaminhamento?",
     "nome_completo": "Qual é o seu nome completo?",
     "nascimento": "Qual é a sua data de nascimento?",
     "cpf": "Qual é o seu CPF?",
     "rg": "Qual é o seu RG?",
-    "endereco": "Qual é o seu endereço completo (rua, número, bairro e cidade)?",
+    "email": "Qual é o seu e-mail?",
+    "endereco": "Qual é o seu endereço completo, com CEP?",
+    "cep": "Qual é o CEP do seu endereço?",
     "disponibilidade": "Quais dias e horários ficam melhores para você?",
     "tipo_consulta": "É a sua primeira consulta ou um retorno?",
-    "saude": ("Por último: você tem alguma condição de saúde, alergia ou usa algum "
+    "saude": ("Por último: você tem algum problema de saúde, alergia ou usa algum "
               "medicamento contínuo?"),
 }
 
 # Quando a pergunta precisa ser repetida (o paciente respondeu outra coisa).
 PERGUNTAS_CURTAS = {
-    "queixa": "Qual é a sua principal queixa?",
+    "nome": "Qual é o seu nome?",
+    "queixa": "Qual seria a sua queixa (reclamação)?",
     "disponibilidade": "Quais dias e horários são melhores?",
-    "saude": "Você tem alguma condição de saúde, alergia ou usa medicamento contínuo?",
+    "saude": "Você tem algum problema de saúde, alergia ou usa medicamento contínuo?",
 }
 
 PERGUNTA_CONFIRMACAO = "Está tudo certo? Posso encaminhar para a equipe confirmar o seu horário?"
@@ -198,20 +206,26 @@ _ITENS_CADASTRO = {
     "nascimento": "Data de nascimento",
     "cpf": "CPF",
     "rg": "RG",
-    "endereco": "Endereço completo (rua, número, bairro e cidade)",
+    "email": "E-mail",
+    "endereco": "Endereço com CEP",
+    "cep": "CEP",
 }
 
 
 def _pergunta_cadastro(ficha: dict) -> str:
     """Pede o cadastro de uma vez; depois, so o que ficou faltando."""
     faltam = [c for c in CADASTRO if not ficha.get(c)]
-    lista = "\n".join(f"• {_ITENS_CADASTRO[c]}" for c in faltam)
+    # "Endereço com CEP" ja pede o CEP: o item CEP so aparece sozinho.
+    itens = [c for c in faltam if not (c == "cep" and "endereco" in faltam)]
+    lista = "\n".join(f"• {_ITENS_CADASTRO[c]}" for c in itens)
     if not ficha.get("cadastro_pedido"):
         ficha["cadastro_pedido"] = True
-        return ("Agora vou precisar de alguns dados para fazer o seu cadastro. "
-                f"Pode me enviar:\n{lista}")
-    if len(faltam) == 1:
-        return PERGUNTAS[faltam[0]]
+        # Roteiro do doutor (23/10), texto dele.
+        return ("Para agendamento da sua consulta, vou precisar fazer um pré-cadastro do(a) "
+                "senhor(a). Para isso, poderia me passar as seguintes informações, por "
+                f"gentileza:\n{lista}")
+    if len(itens) == 1:
+        return PERGUNTAS[itens[0]]
     return f"Para completar o seu cadastro, ainda preciso de:\n{lista}"
 
 
@@ -219,6 +233,9 @@ def pergunta_do_campo(ficha: dict, campo: str, repetida: bool = False) -> str:
     """Pergunta do campo. Com area identificada, a da area tem preferencia."""
     if campo in CADASTRO:
         return _pergunta_cadastro(ficha)
+    # "...e em que posso ajudar?" so quando ainda nao se sabe o que ele quer.
+    if campo == "nome" and ficha.get("queixa"):
+        return PERGUNTAS_CURTAS["nome"]
     if repetida and campo in PERGUNTAS_CURTAS:
         return PERGUNTAS_CURTAS[campo]
     chave = _PERGUNTA_DA_AREA.get(campo)
@@ -578,7 +595,7 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         # Recusa vale para qualquer campo; "nao tenho" so para documento (RG,
         # CPF) - para o nome completo ele nao quer dizer nada.
         recusa = re.search(r"\b(?:prefiro nao|nao quero (?:informar|passar|dizer))\b", t)
-        sem_documento = campo in ("rg", "cpf") and re.search(r"\bnao tenho\b", t)
+        sem_documento = campo in ("rg", "cpf", "email", "cep") and re.search(r"\bnao tenho\b", t)
         if recusa or sem_documento:
             ficha[campo] = NAO_INFORMADO
             return True
@@ -647,6 +664,8 @@ _CAMPOS_CORRIGIVEIS = [
     ("nascimento", r"\bnascimento\b|\bnasci\b|\bdata de nasc"),
     ("cpf", r"\bcpf\b"),
     ("rg", r"\brg\b|\bidentidade\b"),
+    ("email", r"\be-?mail\b"),
+    ("cep", r"\bcep\b"),
     ("endereco", r"\bendereco\b|\bmoro\b|\brua\b|\bavenida\b|\bnumero da casa\b"),
     ("cidade", r"\bcidade\b"),
     ("disponibilidade", r"\b(horario|horarios|dia|dias|disponibilidade|turno|periodo)\b"),
@@ -677,7 +696,7 @@ def aplicar_correcao(ficha: dict, texto: str) -> str:
     if campo == "tipo_consulta":
         ficha[campo] = "Retorno" if "retorno" in t else "Primeira consulta"
         return campo
-    if campo in ("cpf", "nascimento", "rg"):
+    if campo in ("cpf", "nascimento", "rg", "email", "cep"):
         # Mesmo leitor do cadastro: CPF conferido, data padronizada.
         dados = extrair_cadastro(texto, campo_esperado=campo)
         if dados.get("_aviso"):
@@ -726,13 +745,23 @@ _RX_CPF = re.compile(r"(?<!\d)(\d{3})[.\s]?(\d{3})[.\s]?(\d{3})[-.\s]?(\d{2})(?!
 _RX_DATA = re.compile(r"(?<!\d)(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})(?!\d)")
 _RX_ROTULO = re.compile(
     r"(?im)^[\s•*·\-–]*(nome(?: completo)?|data de nascimento|nascimento|data nasc\w*|dn|cpf|rg|identidade"
-    r"|endere[cç]o(?: completo)?|end\.?)\s*[:=\-]\s*(.+?)\s*$")
+    r"|e-?mail|endere[cç]o(?: completo| com cep)?|end\.?|cep)\s*[:=\-]\s*(.+?)\s*$")
 _ROTULO_CAMPO = {
     "nome": "nome_completo", "nome completo": "nome_completo",
     "data de nascimento": "nascimento", "nascimento": "nascimento", "dn": "nascimento",
     "cpf": "cpf", "rg": "rg", "identidade": "rg", "endereco": "endereco", "endereço": "endereco",
-    "endereco completo": "endereco", "end": "endereco", "end.": "endereco",
+    "endereco completo": "endereco", "endereco com cep": "endereco", "end": "endereco",
+    "end.": "endereco", "e-mail": "email", "email": "email", "cep": "cep",
 }
+_RX_EMAIL = re.compile(r"(?i)\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
+# CEP com hifen ("76820-000", "76.820-000") ou com a palavra CEP. Oito
+# digitos soltos podem ser RG: sem o rotulo, nao viram CEP.
+_RX_CEP = re.compile(r"(?i)(?:\bcep\b\s*[:.\-]?\s*(\d{2}\.?\d{3}-?\d{3})|(?<![\d.])(\d{2}\.?\d{3}-\d{3})(?![\d-]))")
+
+
+def _formatar_cep(bruto: str) -> str:
+    d = re.sub(r"\D", "", bruto)
+    return f"{d[:5]}-{d[5:]}" if len(d) == 8 else ""
 
 # O paciente copia a mensagem do pedido e preenche por cima (teste do Dr.
 # Fabricio, 12/10): a frase da assistente e o item que ficou sem resposta
@@ -741,9 +770,11 @@ _ROTULO_CAMPO = {
 # como completo sem o endereco.
 _RX_TEXTO_DO_PEDIDO = re.compile(
     r"(?i)vou precisar de alguns dados|pode me enviar|para completar o seu cadastro|"
-    r"ainda preciso de|leve no dia da avalia|sem problema, isso pode ser visto")
+    r"ainda preciso de|leve no dia da avalia|sem problema, isso pode ser visto|"
+    r"pre-cadastro|pré-cadastro|seguintes informa")
 _PALAVRAS_DO_MODELO = {"rua", "numero", "bairro", "cidade", "e", "completo", "endereco",
-                       "nome", "data", "de", "nascimento", "cpf", "rg"}
+                       "nome", "data", "de", "nascimento", "cpf", "rg", "com", "cep",
+                       "mail", "email"}
 
 
 def _so_modelo(valor: str) -> bool:
@@ -821,6 +852,43 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
             achados[campo] = valor.strip()
     resto = _RX_ROTULO.sub(" ", resto)
 
+    # E-mail e CEP saem do texto antes de tudo: o CEP com hifen virava RG e o
+    # e-mail virava pedaco de nome.
+    if "email" in achados:
+        m = _RX_EMAIL.search(achados["email"])
+        if m:
+            achados["email"] = m.group(0).lower()
+        elif not re.search(r"\bnao tenho\b", clinica.normalizar(achados["email"])):
+            achados.pop("email")
+    m = _RX_EMAIL.search(resto)
+    if m:
+        achados.setdefault("email", m.group(0).lower())
+        resto = resto.replace(m.group(0), " ")
+    # RG com rotulo antes do CEP: "RG 12.345-678" tem o formato de um CEP.
+    m = _RX_RG.search(resto)
+    if m and "rg" not in achados:
+        achados["rg"] = m.group(1).strip(".-")
+        resto = resto.replace(m.group(0), " ")
+    if "cep" in achados:
+        cep = _formatar_cep(achados["cep"])
+        if cep:
+            achados["cep"] = cep
+        else:
+            achados.pop("cep")
+    for m in list(_RX_CEP.finditer(resto)):
+        cep = _formatar_cep(m.group(1) or m.group(2))
+        if cep:
+            achados.setdefault("cep", cep)
+            resto = resto.replace(m.group(0), " ")
+    if "endereco" in achados:
+        # "Rua X, 10, Centro, CEP 76820-000": o CEP vai para o campo dele.
+        for m in list(_RX_CEP.finditer(achados["endereco"])):
+            cep = _formatar_cep(m.group(1) or m.group(2))
+            if cep:
+                achados.setdefault("cep", cep)
+                achados["endereco"] = achados["endereco"].replace(m.group(0), " ")
+        achados["endereco"] = " ".join(achados["endereco"].split()).strip(" ,;.-")
+
     aviso_cpf = "O CPF informado parece ter algum número trocado. Pode conferir?"
     # CPF com rotulo: confere o digito verificador e padroniza.
     if "cpf" in achados:
@@ -856,7 +924,7 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
 
     # O que sobrou, por pedaco: endereco a partir da palavra de logradouro;
     # nome completo e o trecho so de letras com duas palavras ou mais.
-    resto = re.sub(r"(?i)\b(cpf|rg|nascimento|endere[cç]o|nome completo)\b", " ", resto)
+    resto = re.sub(r"(?i)\b(cpf|rg|nascimento|endere[cç]o|nome completo|e-?mail|cep)\b", " ", resto)
     if "endereco" not in achados:
         m = _RX_ENDERECO.search(resto)
         if m:
@@ -889,6 +957,9 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
                 achados.pop("nome_completo", None)
         elif campo_esperado == "nome_completo" and _eh_nome_completo(limpo):
             achados["nome_completo"] = _titulo(limpo)
+        elif campo_esperado == "cep" and _formatar_cep(limpo) and re.fullmatch(r"[\d.\-\s]+", limpo):
+            # Resposta seca a "Qual é o CEP?": oito digitos valem, sem hifen.
+            achados["cep"] = _formatar_cep(limpo)
 
     if "nome_completo" in achados:
         achados["nome_completo"] = _titulo(achados["nome_completo"])

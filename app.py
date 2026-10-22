@@ -1030,7 +1030,8 @@ MENSAGEM_FILA = ("Sua solicitação já está com a equipe do Dr. Fabrício, que
                  "responder por aqui em breve.")
 MENSAGEM_RETOMADA = "Sua solicitação anterior continua com a equipe do Dr. Fabrício."
 # Dados que valem para um novo atendimento: nao se pergunta de novo.
-_FICHA_QUE_FICA = ("nome", "nome_completo", "nascimento", "cpf", "rg", "endereco", "telefone")
+_FICHA_QUE_FICA = ("nome", "nome_completo", "nascimento", "cpf", "rg", "email", "endereco", "cep",
+                   "telefone")
 
 
 def _horas_desde(iso_utc: str) -> float:
@@ -2742,12 +2743,8 @@ def _salvar_horario(ag_id: int, remarcar: bool):
     erro_google = _sincronizar_google(ag)
     avisado = False
     if data.get("avisar", True):
-        quando = _quando_por_extenso(inicio)
-        texto = (f"Sua avaliação com o Dr. Fabrício foi remarcada para {quando}." if remarcar
-                 else f"Sua avaliação com o Dr. Fabrício está confirmada para {quando}.")
-        endereco = clinica.info_clinica("endereco")
-        if endereco:
-            texto += f"\n\nEndereço: {endereco}"
+        # Cartao do roteiro do doutor (23/10): medicos, dia, hora e local.
+        texto = clinica.cartao_consulta_agendada(inicio, remarcada=remarcar)
         avisado = _avisar_paciente(ag, texto)
     events.emit("agendamento_atualizado", {"id": ag_id, "status": ag["status"]})
     return jsonify({"ok": True, "agendamento": database.obter_agendamento(ag_id),

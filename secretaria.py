@@ -45,11 +45,23 @@ def saudacao(momento: datetime) -> str:
     return "Boa noite"
 
 
+# Roteiro do doutor (23/10): o nome e a empresa sao os dele. AGENTE_NOME no
+# ambiente troca o nome sem deploy.
+NOME_PADRAO = "Elisângela"
+EMPRESA = "Accuratio"
+
+
 def apresentacao(momento: datetime, nome: str = "") -> str:
-    quem = f"a {AGENTE_NOME}, assistente virtual" if AGENTE_NOME else "a assistente virtual"
     vocativo = f", {nome.split()[0]}" if nome else ""
-    return (f"{saudacao(momento)}{vocativo}! Aqui é {quem} do consultório do "
-            f"{clinica.PROFISSIONAL_COMPLETO}, cirurgião bucomaxilofacial.")
+    return (f"{saudacao(momento)}{vocativo}! Me chamo {AGENTE_NOME or NOME_PADRAO}. Sou a "
+            f"colaboradora da {EMPRESA} e vou iniciar o seu atendimento.")
+
+
+def _valor_para(ficha: dict) -> str:
+    """Valor da consulta pela area da queixa (roteiro do doutor)."""
+    if clinica.valor_da_consulta(ficha.get("area", ""), ficha.get("queixa", "")):
+        ficha["valor_informado"] = True
+    return clinica.resposta_valor(ficha.get("area", ""), ficha.get("queixa", ""))
 
 
 _SO_CUMPRIMENTO = re.compile(
@@ -226,6 +238,11 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
             ficha["ultima_pergunta"] = ""
             d.tipos.append("encaminhado")
             d.partes.append(clinica.RESPOSTA_ENCAMINHADO)
+            # Roteiro do doutor: se o paciente ainda nao perguntou, o valor
+            # vem agora.
+            if not ficha.get("valor_informado"):
+                d.tipos.append("valor")
+                d.partes.append(_valor_para(ficha))
             orientacoes = clinica.orientacoes_pre_consulta(ficha)
             if orientacoes:
                 d.partes.append(orientacoes)
@@ -294,6 +311,12 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     mudou = fp.extrair_passivo(ficha, texto) if texto else []
     if mudou:
         d.tipos.append("passivo:" + ",".join(mudou))
+    # "Não tenho osso para implante" nao passa na captura (comeca com "nao"),
+    # mas a leitura da mensagem achou a queixa: e a resposta a pergunta.
+    if ultima == "queixa" and not capturou and "queixa" in mudou:
+        capturou = True
+        ficha["ultima_pergunta"] = ""
+        d.tipos.append("captura:queixa")
 
     # ── 5. Trauma: descartar gravidade antes de qualquer outra coisa ─────────
     if ficha.get("area") == "trauma" and not ficha.get("triagem_trauma"):
@@ -313,14 +336,16 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     cobre_queixa = False
     for tipo, resposta in travadas:
         d.tipos.append(tipo)
-        d.partes.append(resposta)
+        d.partes.append(_valor_para(ficha) if tipo == "preco" else resposta)
         if tipo == "nao_sei":
             cobre_queixa = True
 
     # ── 7. Acolhimento da área, quando ela aparece pela primeira vez ─────────
     area = ficha.get("area", "")
     if (area and area != area_antes and area != "trauma"
-            and ficha.get("intencao") != "pronto_agendar"):
+            and ficha.get("intencao") != "pronto_agendar"
+            # Roteiro do doutor: a resposta a queixa e so "Entendido." e o pre-cadastro.
+            and not (capturou and ultima == "queixa")):
         d.tipos.append(f"area:{area}")
         d.partes.append(clinica.AREAS[area]["acolhimento"])
 
@@ -374,10 +399,10 @@ def _confirmacao(campo: str, ficha: dict) -> str:
         if aviso:
             return aviso
         if all(ficha.get(c) for c in fp.CADASTRO):
-            return "Cadastro completo, obrigada! Agora vamos ao agendamento."
+            return "Cadastro completo, obrigada. Agora vamos ao agendamento."
         return "Obrigada!"
     if campo == "nome" and ficha.get("nome"):
-        return f"Prazer, {ficha['nome'].split()[0]}!"
+        return f"Tudo bem, {ficha['nome'].split()[0]}."
     if campo == "sinais_gravidade":
         return "Obrigada por responder."
     if campo == "exames":
@@ -388,11 +413,11 @@ def _confirmacao(campo: str, ficha: dict) -> str:
         return ("Ótimo, isso ajuda o Dr. Fabrício a entender o seu caso." if valor == "sim" or profissional
                 else "Tudo bem.")
     return {
-        "queixa": "Entendi.",
+        "queixa": "Entendido.",
         "detalhe_area": "Obrigada pelos detalhes.",
         "tempo_queixa": "Entendi.",
         "cidade": "Perfeito.",
-        "disponibilidade": "Anotado.",
+        "disponibilidade": "Certo.",
         "tipo_consulta": "Certo.",
         "saude": "Obrigada pelas informações.",
     }.get(campo, "")
@@ -542,7 +567,7 @@ def _retorno(ficha: dict, d: Decisao, texto: str, t: str, consulta: dict, fechar
     travadas = clinica.respostas_travadas(texto) if texto else []
     for tipo, resposta in travadas:
         d.tipos.append(tipo)
-        d.partes.append(resposta)
+        d.partes.append(_valor_para(ficha) if tipo == "preco" else resposta)
 
     if (texto and not travadas and not perguntou_situacao and tem_duvida_aberta(texto)
             and not e_so_cumprimento(texto)):

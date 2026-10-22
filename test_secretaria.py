@@ -221,21 +221,19 @@ class ConferenciaDoModelo(unittest.TestCase):
 
 
 CADASTRO_OK = ("Maria Silva Souza\n12/03/1990\nCPF 529.982.247-25\nRG 1234567\n"
-               "Rua das Flores, 120, Centro, Goiânia")
+               "maria@email.com\nRua das Flores, 120, Centro, Goiânia, CEP 74000-000")
 
 
 class Fluxo(unittest.TestCase):
-    """Fluxo pedido pelo Dr. Fabricio (06/10): queixa, exame, cadastro, agendamento."""
+    """Roteiro do Dr. Fabricio (23/10): nome, queixa, pre-cadastro, dias e
+    horarios, saude, resumo, encaminhamento e valor da consulta."""
 
     CONVERSA = [
         "Oi",
         "Maria Silva",
         "Preciso tirar o siso",
-        "o de baixo, está doendo um pouco",
-        "tenho panorâmica",
         CADASTRO_OK,
         "terças à tarde",
-        "primeira",
         "não",
         "sim",
     ]
@@ -243,32 +241,46 @@ class Fluxo(unittest.TestCase):
     def test_conversa_completa(self):
         ficha, saidas = conversa(self.CONVERSA)
         textos = [t for _, _, t in saidas]
-        self.assertTrue(textos[0].startswith("Boa tarde! Aqui é a assistente virtual"))
-        self.assertIn(fp.PERGUNTAS["nome"], textos[0])
-        self.assertTrue(textos[1].startswith("Prazer, Maria!"))
-        self.assertIn(clinica.AREAS["exodontia"]["acolhimento"], textos[2])
-        self.assertIn(clinica.AREAS["exodontia"]["pergunta"], textos[2])
-        self.assertIn(clinica.AREAS["exodontia"]["pergunta_exames"], textos[3])
-        # Depois do exame vem o cadastro, pedido de uma vez.
-        self.assertIn("Agora vou precisar de alguns dados para fazer o seu cadastro", textos[4])
-        for item in ("Nome completo", "Data de nascimento", "CPF", "RG", "Endereço completo"):
-            self.assertIn(item, textos[4])
-        self.assertIn("Cadastro completo, obrigada! Agora vamos ao agendamento.", textos[5])
-        self.assertIn(fp.PERGUNTAS["disponibilidade"], textos[5])
-        self.assertIn("Confira os dados da sua solicitação", textos[8])
-        self.assertIn(fp.PERGUNTA_CONFIRMACAO, textos[8])
-        self.assertIn(clinica.RESPOSTA_ENCAMINHADO, textos[9])
-        self.assertTrue(saidas[9][1].encaminhar)
+        self.assertEqual(textos[0], "Boa tarde! Me chamo Elisângela. Sou a colaboradora da "
+                                    "Accuratio e vou iniciar o seu atendimento.\n\n"
+                                    "Qual o seu nome e em que posso ajudar?")
+        self.assertEqual(textos[1], "Tudo bem, Maria. Poderia me adiantar qual seria o motivo "
+                                    "da sua consulta? Qual seria a sua queixa (reclamação)?")
+        # Depois da queixa, direto o pre-cadastro: sem acolhimento nem exame.
+        self.assertTrue(textos[2].startswith("Entendido. Para agendamento da sua consulta, vou "
+                                             "precisar fazer um pré-cadastro"))
+        self.assertNotIn(clinica.AREAS["exodontia"]["acolhimento"], textos[2])
+        for item in ("Nome completo", "Data de nascimento", "CPF", "RG", "E-mail", "Endereço com CEP"):
+            self.assertIn(f"• {item}", textos[2])
+        self.assertEqual(textos[3], "Cadastro completo, obrigada. Agora vamos ao agendamento. "
+                                    "Quais dias e horários ficam melhores para você?")
+        self.assertEqual(textos[4], "Certo. Por último: você tem algum problema de saúde, alergia "
+                                    "ou usa algum medicamento contínuo?")
+        self.assertIn("Confira os dados da sua solicitação", textos[5])
+        self.assertIn(fp.PERGUNTA_CONFIRMACAO, textos[5])
+        self.assertIn(clinica.RESPOSTA_ENCAMINHADO, textos[6])
+        # Siso: o valor de R$ 300 vem depois do encaminhamento.
+        self.assertIn(clinica.cartao_valor(300), textos[6])
+        self.assertTrue(saidas[6][1].encaminhar)
 
         self.assertEqual(ficha["nome"], "Maria Silva")
         self.assertEqual(ficha["nome_completo"], "Maria Silva Souza")
         self.assertEqual(ficha["nascimento"], "12/03/1990")
         self.assertEqual(ficha["cpf"], "529.982.247-25")
         self.assertEqual(ficha["rg"], "1234567")
+        self.assertEqual(ficha["email"], "maria@email.com")
         self.assertEqual(ficha["endereco"], "Rua das Flores, 120, Centro, Goiânia")
-        self.assertEqual(ficha["tipo_consulta"], "Primeira consulta")
+        self.assertEqual(ficha["cep"], "74000-000")
         self.assertEqual(ficha["saude"], "Nada relatado")
         self.assertEqual(ficha["status"], "encaminhado")
+
+    def test_perguntas_tiradas_pelo_roteiro(self):
+        """Detalhes da area, exames e primeira/retorno sairam (roteiro de 23/10)."""
+        _, saidas = conversa(self.CONVERSA)
+        tudo = " ".join(t for _, _, t in saidas)
+        self.assertNotIn(clinica.AREAS["exodontia"]["pergunta"], tudo)
+        self.assertNotIn(clinica.AREAS["exodontia"]["pergunta_exames"], tudo)
+        self.assertNotIn("primeira consulta ou um retorno", tudo)
 
     def test_perguntas_removidas_pelo_doutor(self):
         """Indicacao, ha quanto tempo e cidade nao sao mais perguntados (06/10)."""
@@ -294,35 +306,55 @@ class Fluxo(unittest.TestCase):
         # A queixa sem o "Me chamo José" junto.
         self.assertEqual(ficha["queixa"], "Minha principal queixa é a posição do meu queixo. "
                                           "Acho que preciso de cirurgia Ortognática")
-        self.assertIn("Agora vou precisar de alguns dados para fazer o seu cadastro", saidas[2][2])
+        self.assertIn("pré-cadastro", saidas[1][2])
         self.assertFalse(any(d.usar_llm for _, d, _ in saidas))
 
     def test_cadastro_em_partes_pede_so_o_que_falta(self):
-        ficha, saidas = conversa(self.CONVERSA[:5] + [
-            "Maria Silva Souza\n12/03/1990", "529.982.247-25\nRG 1234567"])
-        self.assertIn("ainda preciso de", saidas[5][2])
-        self.assertNotIn("Nome completo", saidas[5][2])
-        self.assertIn("CPF", saidas[5][2])
-        self.assertIn(fp.PERGUNTAS["endereco"], saidas[6][2])
+        ficha, saidas = conversa(self.CONVERSA[:3] + [
+            "Maria Silva Souza\n12/03/1990", "529.982.247-25\nRG 1234567\nmaria@email.com"])
+        self.assertIn("ainda preciso de", saidas[3][2])
+        self.assertNotIn("Nome completo", saidas[3][2])
+        self.assertIn("CPF", saidas[3][2])
+        self.assertIn(fp.PERGUNTAS["endereco"], saidas[4][2])
         self.assertEqual(ficha["ultima_pergunta"], "endereco")
 
+    def test_endereco_sem_cep_pede_o_cep(self):
+        ficha, saidas = conversa(self.CONVERSA[:3] + [
+            "Maria Silva Souza\n12/03/1990\n529.982.247-25\nRG 1234567\nmaria@email.com\n"
+            "Rua das Flores, 120, Centro, Goiânia", "74000000"])
+        self.assertIn(fp.PERGUNTAS["cep"], saidas[3][2])
+        self.assertEqual(ficha["cep"], "74000-000")
+        self.assertEqual(ficha["rg"], "1234567")
+        self.assertIn("Cadastro completo", saidas[4][2])
+
+    def test_rg_com_hifen_nao_vira_cep(self):
+        d = fp.extrair_cadastro("Ana Lima, 529.982.247-25, RG 12.345-678, Rua A, 10, Centro, 76820-000")
+        self.assertEqual((d["rg"], d["cep"], d["endereco"]), ("12.345-678", "76820-000", "Rua A, 10, Centro"))
+
+    def test_sem_email_segue_o_cadastro(self):
+        f = fp.nova("1")
+        self.assertTrue(fp.capturar_resposta(f, "email", "não tenho e-mail"))
+        self.assertEqual(f["email"], fp.NAO_INFORMADO)
+
     def test_nao_tenho_no_cadastro_nao_apaga_o_nome(self):
-        ficha, _ = conversa(self.CONVERSA[:5] + ["não tenho"])
+        ficha, _ = conversa(self.CONVERSA[:3] + ["não tenho"])
         self.assertEqual(ficha["nome_completo"], "")
         f = fp.nova("1")
         self.assertTrue(fp.capturar_resposta(f, "rg", "não tenho RG"))
         self.assertEqual(f["rg"], fp.NAO_INFORMADO)
 
     def test_cpf_errado_e_avisado(self):
-        ficha, saidas = conversa(self.CONVERSA[:5] + ["Maria Silva Souza, 12/03/1990, CPF 123.456.789-00"])
+        ficha, saidas = conversa(self.CONVERSA[:3] + ["Maria Silva Souza, 12/03/1990, CPF 123.456.789-00"])
         self.assertEqual(ficha["cpf"], "")
         self.assertEqual(ficha["rg"], "")
         self.assertIn("CPF informado parece ter algum número trocado", saidas[-1][2])
 
     def test_resumo_vai_numa_mensagem_so(self):
         _, saidas = conversa(self.CONVERSA)
-        blocos = saidas[8][2].split("\n\n")
-        self.assertTrue(any(b.startswith("Confira os dados") and "• Nome completo: Maria Silva Souza" in b for b in blocos))
+        blocos = saidas[5][2].split("\n\n")
+        self.assertTrue(any(b.startswith("Confira os dados") and "• Nome completo: Maria Silva Souza" in b
+                            and "• E-mail: maria@email.com" in b and "• CEP: 74000-000" in b
+                            for b in blocos))
 
     def test_resumo_com_resposta_em_varias_linhas(self):
         ficha = fp.nova("1")
@@ -335,10 +367,10 @@ class Fluxo(unittest.TestCase):
         textos = [t for _, _, t in saidas]
         self.assertFalse(any("Certo, anotado." in t for t in textos))
         confirmacoes = [d.confirmacao for _, d, _ in saidas if d.confirmacao]
-        self.assertGreaterEqual(len(confirmacoes), 5)
+        self.assertGreaterEqual(len(confirmacoes), 4)
         self.assertEqual(len(confirmacoes), len(set(confirmacoes)))
         # Confirmacao e pergunta na MESMA mensagem (uma bolha so).
-        self.assertIn(f"Prazer, Maria! {fp.PERGUNTAS['queixa']}", textos[1].split("\n\n"))
+        self.assertIn(f"Tudo bem, Maria. {fp.PERGUNTAS['queixa']}", textos[1].split("\n\n"))
 
     def test_cumprimento_no_meio_e_respondido(self):
         for cumprimento in ["Boa noite", "Olá, boa noite", "oi, tudo bem?"]:
@@ -366,18 +398,19 @@ class Fluxo(unittest.TestCase):
 
     def test_orientacoes_conforme_a_ficha(self):
         # Sem exames, sem indicacao e sem medicamento: nada de "leve seus exames".
-        ficha, saidas = conversa(self.CONVERSA[:4] + ["não tenho"] + self.CONVERSA[5:])
+        ficha, saidas = conversa(self.CONVERSA)
         self.assertNotIn("leve seus exames", saidas[-1][2])
         self.assertNotIn("Para a avaliação, leve", saidas[-1][2])
-        # Com exame e com medicamento: as duas orientacoes.
-        ficha, saidas = conversa(self.CONVERSA[:-2] + ["uso losartana", "sim"])
+        # Exame contado pelo paciente e medicamento: as duas orientacoes.
+        ficha, saidas = conversa(["Oi", "Maria Silva", "Preciso tirar o siso, tenho panorâmica",
+                                  CADASTRO_OK, "terças à tarde", "uso losartana", "sim"])
         self.assertIn("Para a avaliação, leve seus exames e a lista dos medicamentos que você usa.",
                       saidas[-1][2])
         self.assertEqual(clinica.orientacoes_pre_consulta({"exames": "Não possui", "saude": "Nada relatado"}), "")
 
     def test_confirmacao_vem_antes_do_resumo(self):
         _, saidas = conversa(self.CONVERSA)
-        blocos = saidas[8][2].split("\n\n")
+        blocos = saidas[5][2].split("\n\n")
         self.assertEqual(blocos[0], "Obrigada pelas informações.")
         self.assertTrue(blocos[1].startswith("Confira os dados"))
 
@@ -400,7 +433,7 @@ class Fluxo(unittest.TestCase):
         self.assertEqual(ficha["cidade"], "Anápolis")
         self.assertTrue(ficha["exames"].startswith("Sim"))
         self.assertEqual(ficha["intencao"], "pronto_agendar")
-        # Pronto para agendar e exame ja informado: vai direto para o cadastro.
+        # Nome e queixa ja informados: vai direto para o pre-cadastro.
         self.assertEqual(ficha["ultima_pergunta"], "nome_completo")
 
     def test_nao_sei_espera_a_queixa(self):
@@ -410,16 +443,16 @@ class Fluxo(unittest.TestCase):
         self.assertEqual(ficha["queixa"], "meu queixo é pequeno")
         self.assertEqual(ficha["area"], "mentoplastia")
 
-    def test_prerequisito_de_exame_por_procedimento(self):
-        """Cada area pergunta o proprio exame, e depois vem o cadastro."""
+    def test_queixa_de_qualquer_area_vai_ao_pre_cadastro(self):
+        """Roteiro de 23/10: sem pergunta de exame; a queixa leva ao pre-cadastro."""
         for area, queixa in [("enxerto", "Não tenho osso para implante"),
                              ("ortognatica", "Minha mordida não encaixa"),
                              ("patologia", "Tenho um cisto na mandíbula"),
                              ("papada", "Tenho papada")]:
             with self.subTest(area=area):
-                ficha, saidas = conversa(["Oi", "Ana", queixa, "detalhe qualquer", "não"])
-                self.assertIn(clinica.AREAS[area]["pergunta_exames"], saidas[3][2])
-                self.assertIn("fazer o seu cadastro", saidas[4][2])
+                ficha, saidas = conversa(["Oi", "Ana", queixa])
+                self.assertEqual(ficha["area"], area)
+                self.assertTrue(saidas[2][2].startswith("Entendido. Para agendamento"))
 
     def test_indicacao_do_dentista_e_reconhecida(self):
         ficha, _ = conversa(["Oi, vim por indicação do meu dentista para tirar o siso"])
@@ -431,12 +464,57 @@ class Fluxo(unittest.TestCase):
         self.assertEqual(ficha["area"], "exodontia")
 
     def test_preco_no_meio_do_funil(self):
+        # Sem queixa ainda: nao chuta valor, a equipe confirma.
         ficha, saidas = conversa(["Oi", "Ana", "Quanto custa?"])
         texto = saidas[2][2]
-        self.assertIn(clinica.RESPOSTA_PRECO, texto)
+        self.assertIn(clinica.RESPOSTA_VALOR_A_CONFIRMAR, texto)
         # A queixa ja tinha sido perguntada: volta na versao curta.
         self.assertIn(fp.PERGUNTAS_CURTAS["queixa"], texto)
         self.assertNotIn("R$", texto)
+
+    def test_valor_pela_queixa(self):
+        """R$ 400: ATM, apneia, ortognatica, esteticas. R$ 300: siso, enxerto,
+        lesoes, biopsias. O resto, a equipe confirma (decisao de 23/10)."""
+        for queixa, valor in [("Tenho dor na ATM", 400), ("Tenho apneia do sono", 400),
+                              ("Minha mordida não encaixa", 400), ("Tenho papada", 400),
+                              ("Preciso tirar o siso", 300), ("Tenho um cisto na mandíbula", 300),
+                              ("Não tenho osso para implante", 300), ("dor no dente", None)]:
+            with self.subTest(queixa=queixa):
+                ficha, saidas = conversa(["Oi", "Ana", queixa, "quanto custa a consulta?"])
+                texto = saidas[3][2]
+                if valor:
+                    self.assertIn(clinica.cartao_valor(valor), texto)
+                    self.assertTrue(ficha["valor_informado"])
+                else:
+                    self.assertIn(clinica.RESPOSTA_VALOR_A_CONFIRMAR, texto)
+                    self.assertNotIn("R$", texto)
+
+    def test_valor_ja_dito_nao_se_repete_no_encaminhamento(self):
+        conversa_ = self.CONVERSA[:3] + ["qual o valor?"] + self.CONVERSA[3:]
+        _, saidas = conversa(conversa_)
+        self.assertIn(clinica.cartao_valor(300), saidas[3][2])
+        self.assertIn(clinica.RESPOSTA_ENCAMINHADO, saidas[-1][2])
+        self.assertNotIn("R$", saidas[-1][2])
+
+    def test_sem_valor_definido_o_encaminhamento_avisa_que_a_equipe_confirma(self):
+        _, saidas = conversa(["Oi", "Ana", "dor no dente", CADASTRO_OK, "terças à tarde",
+                              "não", "sim"])
+        self.assertIn(clinica.RESPOSTA_VALOR_A_CONFIRMAR, saidas[-1][2])
+        self.assertNotIn("R$", saidas[-1][2])
+
+    def test_pergunta_se_e_robo_tem_resposta_verdadeira(self):
+        for pergunta in ["Você é um robô?", "estou falando com uma pessoa de verdade?",
+                         "é uma IA?"]:
+            with self.subTest(pergunta=pergunta):
+                _, saidas = conversa(["Oi", pergunta])
+                self.assertIn(clinica.RESPOSTA_IDENTIDADE, saidas[1][2])
+
+    def test_cartao_da_consulta_agendada(self):
+        self.assertEqual(clinica.cartao_consulta_agendada("2026-08-02T15:00"),
+                         "Sua Consulta foi agendada:\n🥼 Dr. Tadeu / Dr. Fabrício\n"
+                         "📌 Dia 02/08 (Domingo)\n⏱️ 15:00 horas\n"
+                         "🏥 Clínica Omnilux / Av. Lauro Sodré, 2800, Bairro Costa e Silva - "
+                         "Porto Velho - RO")
 
     def test_correcao_no_resumo(self):
         ficha, saidas = conversa(self.CONVERSA[:-1] + ["não", "o nome é Maria Silva Souza Lima", "sim"])
@@ -516,15 +594,13 @@ class LeituraDoCadastro(unittest.TestCase):
 class RespostasForaDoEsperado(unittest.TestCase):
     """Respostas que nao seguem o roteiro (bateria de 03/10). Nenhuma vai para a IA."""
 
-    BASE = ["Oi", "Pedro", "Preciso extrair um dente", "siso de baixo"]
+    BASE = ["Oi", "Pedro", "Preciso extrair um dente"]
     ATE = {
         "nome": ["Oi"],
         "queixa": ["Oi", "Pedro"],
-        "exames": BASE,
-        "cadastro": BASE + ["não tenho"],
-        "disponibilidade": BASE + ["não tenho", CADASTRO_OK],
-        "tipo_consulta": BASE + ["não tenho", CADASTRO_OK, "manhã"],
-        "saude": BASE + ["não tenho", CADASTRO_OK, "manhã", "primeira"],
+        "cadastro": BASE,
+        "disponibilidade": BASE + [CADASTRO_OK],
+        "saude": BASE + [CADASTRO_OK, "manhã"],
     }
 
     def responder(self, campo, resposta):
@@ -547,9 +623,9 @@ class RespostasForaDoEsperado(unittest.TestCase):
     def test_sem_conteudo_nao_vira_resposta(self):
         for resposta in ["kkkk", "obrigado", "?", "tem alguém aí?", "bom dia", "pq?"]:
             with self.subTest(resposta=resposta):
-                ficha, texto = self.responder("exames", resposta)
-                self.assertEqual(ficha["exames"], "")
-                self.assertIn(clinica.AREAS["exodontia"]["pergunta_exames"], texto)
+                ficha, texto = self.responder("disponibilidade", resposta)
+                self.assertEqual(ficha["disponibilidade"], "")
+                self.assertIn("dias e horários", texto)
 
     def test_sem_conteudo_no_cadastro(self):
         for resposta in ["kkkk", "pq?", "?"]:
@@ -559,15 +635,12 @@ class RespostasForaDoEsperado(unittest.TestCase):
                 self.assertIn("CPF", texto)
 
     def test_negativas_e_nao_sei(self):
-        self.assertEqual(self.responder("exames", "acho que não")[0]["exames"], "Não possui")
-        self.assertEqual(self.responder("exames", "não sei")[0]["exames"], "Não sabe informar")
-        self.assertTrue(self.responder("exames", "vou fazer semana que vem")[0]["exames"].startswith("Ainda não"))
-        self.assertEqual(self.responder("tipo_consulta", "não sei")[0]["tipo_consulta"], "Não sabe informar")
-        self.assertEqual(self.responder("tipo_consulta", "já fui aí uma vez")[0]["tipo_consulta"], "Retorno")
+        self.assertEqual(self.responder("saude", "não")[0]["saude"], "Nada relatado")
+        self.assertEqual(self.responder("saude", "não sei")[0]["saude"], "Não sabe informar")
 
     def test_confirmacao_combina_com_a_resposta(self):
-        self.assertIn("Sem problema", self.responder("exames", "acho que não")[1])
-        self.assertIn("Ótimo, leve no dia da avaliação.", self.responder("exames", "tenho panorâmica")[1])
+        self.assertTrue(self.responder("saude", "não")[1].startswith("Obrigada pelas informações."))
+        self.assertTrue(self.responder("disponibilidade", "manhã")[1].startswith("Certo. Por último:"))
 
     def test_remedio_citado_na_saude_nao_e_pedido(self):
         ficha, texto = self.responder("saude", "sou alérgica a dipirona")
@@ -634,10 +707,12 @@ class TesteDoDoutor1210(unittest.TestCase):
         texto = saidas[-1][2]
         self.assertNotIn("Lauro Sodré", texto)            # nao responde o endereco do consultorio
         self.assertNotIn("nome completo", texto.lower())   # o nome ja veio
-        self.assertIn(fp.PERGUNTAS["endereco"], texto)
+        self.assertIn("• E-mail\n• Endereço com CEP", texto)  # so o que faltou
         self.assertEqual(ficha["endereco"], "")
-        ficha, saidas = conversa(["Rua Jatuarana, 1500, Nova Floresta, Porto Velho"], ficha)
+        ficha, saidas = conversa(["fabiana@email.com\nRua Jatuarana, 1500, Nova Floresta, Porto Velho, "
+                                  "CEP 76820-000"], ficha)
         self.assertEqual(ficha["endereco"], "Rua Jatuarana, 1500, Nova Floresta, Porto Velho")
+        self.assertEqual(ficha["cep"], "76820-000")
         self.assertIn("Cadastro completo", saidas[-1][2])
 
     def test_resumo_sem_nome_repetido_e_detalhe_com_assunto(self):

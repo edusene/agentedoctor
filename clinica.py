@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
+from datetime import datetime
 
 PROFISSIONAL = "Dr. Fabrício"
 PROFISSIONAL_COMPLETO = "Dr. Fabrício Guimarães"
@@ -166,7 +167,79 @@ RESPOSTA_DUVIDA_GENERICA = (
 # Seção 18: ... AGENDAMENTO → CONFIRMAÇÃO → ORIENTAÇÕES PRÉ-CONSULTA.
 RESPOSTA_ENCAMINHADO = (
     "Perfeito! Sua solicitação foi encaminhada à equipe, que vai confirmar o dia "
-    "e o horário da sua avaliação por aqui."
+    "e horário da sua avaliação por aqui."
+)
+
+
+# ── Roteiro do Dr. Fabricio (23/10): valor da consulta e consulta agendada ───
+# Texto e valores do doutor, travados aqui: o modelo nunca fala de valor.
+MEDICOS = "Dr. Tadeu / Dr. Fabrício"
+LOCAL_CONSULTA = "Clínica Omnilux / Av. Lauro Sodré, 2800, Bairro Costa e Silva - Porto Velho - RO"
+
+# R$ 400: ATM, apneia, ortognática e estéticas. R$ 300: siso, enxerto,
+# lesões e biópsias. O resto (trauma, dor de dente, implante, sem área): o
+# doutor não definiu, e o agente não chuta - a equipe confirma.
+_VALOR_POR_AREA = {
+    "ortognatica": 400, "mentoplastia": 400, "lift_facial": 400, "lift_cervical": 400,
+    "papada": 400,
+    "exodontia": 300, "enxerto": 300, "patologia": 300, "biopsia": 300,
+}
+_RX_VALOR_400 = re.compile(
+    r"\b(atm|articulacao temporo ?mandibular|temporomandibular|apneia|ronco|ronc\w+"
+    r"|estalo\w* (na|da) (mandibula|boca)|mandibula (estala|trava|travando))\b")
+
+RESPOSTA_VALOR_A_CONFIRMAR = (
+    "O valor da consulta depende do motivo do atendimento. A equipe confirma o valor "
+    "junto com o dia e horário da sua avaliação."
+)
+
+
+def valor_da_consulta(area: str, queixa: str = "") -> int | None:
+    """Valor da consulta pelo roteiro do doutor; None = a equipe confirma."""
+    if _RX_VALOR_400.search(normalizar(queixa)):
+        return 400
+    return _VALOR_POR_AREA.get(area or "")
+
+
+def cartao_valor(valor: int) -> str:
+    # Linhas simples (sem linha em branco): o cartao chega numa bolha so.
+    return (f"🥼 {MEDICOS}\n"
+            f"•  Valor da Consulta: R$ {valor}\n"
+            "✅ O valor da consulta é pago no final da sessão\n"
+            "✅ Fornecimento de Recibo/Nota Fiscal da Consulta\n"
+            "✅ Consulta de retorno: a depender da necessidade\n"
+            "Formas de pagamento: Dinheiro, Pix, Débito, Crédito em até 2x sem juros.")
+
+
+def resposta_valor(area: str, queixa: str = "") -> str:
+    valor = valor_da_consulta(area, queixa)
+    return cartao_valor(valor) if valor else RESPOSTA_VALOR_A_CONFIRMAR
+
+
+_DIAS_SEMANA_CAP = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira",
+                    "Sexta-feira", "Sábado", "Domingo"]
+
+
+def cartao_consulta_agendada(inicio: str, remarcada: bool = False) -> str:
+    """'2026-08-02T15:00' -> cartao da consulta agendada, no formato do doutor."""
+    d = datetime.fromisoformat(inicio)
+    titulo = "Sua Consulta foi remarcada:" if remarcada else "Sua Consulta foi agendada:"
+    return (f"{titulo}\n"
+            f"🥼 {MEDICOS}\n"
+            f"📌 Dia {d.strftime('%d/%m')} ({_DIAS_SEMANA_CAP[d.weekday()]})\n"
+            f"⏱️ {d.strftime('%H:%M')} horas\n"
+            f"🏥 {LOCAL_CONSULTA}")
+
+
+# A paciente pergunta se fala com uma pessoa: a resposta e sempre a verdade,
+# mesmo com a saudacao de "colaboradora" do roteiro.
+_RX_IDENTIDADE = re.compile(
+    r"\b(robo|bot|chatbot|inteligencia artificial|maquina|automatic[ao]"
+    r"|(e|eh|es) (uma )?ia|(uma )?pessoa (de verdade|real)|ser humano|human[oa]"
+    r"|gente de verdade|atendente virtual|assistente virtual)\b")
+RESPOSTA_IDENTIDADE = (
+    "Sou a assistente virtual da Accuratio e faço o primeiro atendimento por aqui. "
+    "Se preferir falar com uma pessoa da equipe, é só me pedir."
 )
 
 
@@ -685,7 +758,10 @@ def respostas_travadas(texto: str) -> list[tuple[str, str]]:
         saida.append(("garantia", RESPOSTA_GARANTIA))
     if _RX_VOCE_FAZ.search(t):
         saida.append(("voce_faz", RESPOSTA_VOCE_FAZ))
+    if _RX_IDENTIDADE.search(t) and _e_pergunta(texto, t):
+        saida.append(("identidade", RESPOSTA_IDENTIDADE))
     if _RX_PRECO.search(t):
+        # Texto provisorio: secretaria troca pelo valor da area do paciente.
         saida.append(("preco", resposta_preco()))
     if _RX_NAO_SEI.search(t):
         saida.append(("nao_sei", RESPOSTA_NAO_SEI))
