@@ -894,11 +894,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
             return
 
         contact = database.get_contact(user)
-        retomou = False
+        abertura_retomada = ""
         if contact and not contact["auto_mode"]:
-            if not _fila_humana(user, items, _chegada):
+            abertura_retomada = _fila_humana(user, items, _chegada)
+            if abertura_retomada is None:
                 return
-            retomou = True
 
         # Audio: transcrito aqui, uma vez, para as palavras-chave, a ficha e o
         # funil lerem o que o paciente falou (e nao "[Audio]"). Fica depois da
@@ -927,6 +927,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
         print(f"[flush] user={user} texto={texto[:120]!r} midia={midia or '-'}")
 
         ficha = ficha_paciente.load(user, estrito=True)
+        if ficha.get("status") == "retorno":
+            # A equipe pode ter confirmado, remarcado ou cancelado desde a
+            # retomada: a situacao vem sempre fresca do banco.
+            ficha["consulta"] = _consulta_atual(user)
         decisao = secretaria.decidir(ficha, texto, secretaria.agora(), midia=midia)
         print(f"[secretaria] user={user} decisao={decisao.tipos} "
               f"llm={decisao.usar_llm} proxima={ficha.get('ultima_pergunta')!r}")
@@ -966,8 +970,8 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # recebe uma resposta que a ficha nao lembra (21/10).
         ficha_paciente.save(user, ficha, estrito=True)
 
-        if retomou and mensagem:
-            mensagem = f"{MENSAGEM_RETOMADA}\n\n{mensagem}"
+        if abertura_retomada and mensagem:
+            mensagem = f"{abertura_retomada}\n\n{mensagem}"
         respondeu = True
         if mensagem:
             enviar_em_blocos(user, mensagem, _chegada)
@@ -1017,8 +1021,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
 # nenhum (teste do Dr. Fabricio). Agora: um aviso na hora, uma vez; e, se a
 # equipe nao agiu em FILA_RETOMAR_HORAS, o agente volta a atender. Se a equipe
 # ja agiu (mensagem pelo painel, agendamento confirmado/remarcado/cancelado),
-# a conversa e dela e o agente continua calado.
+# a conversa e dela enquanto ela estiver falando com o paciente: depois de
+# FILA_EQUIPE_INATIVA_HORAS sem nenhuma acao da equipe, o agente tambem volta
+# (paciente que retorna dias depois nao fica sem resposta).
 FILA_RETOMAR_HORAS = float(os.getenv("FILA_RETOMAR_HORAS", "4"))
+FILA_EQUIPE_INATIVA_HORAS = float(os.getenv("FILA_EQUIPE_INATIVA_HORAS", "24"))
 MENSAGEM_FILA = ("Sua solicitação já está com a equipe do Dr. Fabrício, que vai te "
                  "responder por aqui em breve.")
 MENSAGEM_RETOMADA = "Sua solicitação anterior continua com a equipe do Dr. Fabrício."
@@ -1026,29 +1033,54 @@ MENSAGEM_RETOMADA = "Sua solicitação anterior continua com a equipe do Dr. Fab
 _FICHA_QUE_FICA = ("nome", "nome_completo", "nascimento", "cpf", "rg", "endereco", "telefone")
 
 
-def _fila_humana(user: str, items: list[dict], chegada: float) -> bool:
-    """Conversa em modo humano. True = o agente retomou e deve responder."""
+def _horas_desde(iso_utc: str) -> float:
+    try:
+        return (datetime.utcnow() - datetime.fromisoformat(iso_utc)).total_seconds() / 3600
+    except ValueError:
+        return 0.0
+
+
+def _consulta_atual(user: str) -> dict:
+    """Consulta marcada (futura) ou pedido pendente do paciente; {} se nenhum."""
+    agora_local = secretaria.agora().strftime("%Y-%m-%dT%H:%M")
+    return database.consulta_do_paciente(user, agora_local) or {}
+
+
+def _fila_humana(user: str, items: list[dict], chegada: float) -> str | None:
+    """Conversa em modo humano. None = o agente fica calado; texto = o agente
+    retomou e deve responder (o texto, se houver, abre a resposta)."""
     conv = database.get_or_create_conversation(user)
     transferido = conv.get("transferred_at") or ""
     if not transferido:
         # Modo humano ligado a mao pelo painel: a equipe esta com a conversa.
         print(f"[flush] user={user} modo=humano (sem transferencia), ignorando agente")
-        return False
-    if database.equipe_agiu_desde(conv["id"], user, transferido):
-        print(f"[flush] user={user} modo=humano, equipe ja atendendo")
-        return False
-    try:
-        espera_h = (datetime.utcnow() - datetime.fromisoformat(transferido)).total_seconds() / 3600
-    except ValueError:
-        espera_h = 0.0
+        return None
+    ultima_acao = database.ultima_acao_equipe(conv["id"], user, transferido)
+    if ultima_acao:
+        parada_h = _horas_desde(ultima_acao)
+        if parada_h < FILA_EQUIPE_INATIVA_HORAS:
+            print(f"[flush] user={user} modo=humano, equipe ja atendendo")
+            return None
+        motivo = f"a equipe nao fala com o paciente ha {FILA_EQUIPE_INATIVA_HORAS:g} h"
+    else:
+        parada_h = _horas_desde(transferido)
+        motivo = f"a equipe nao respondeu em {FILA_RETOMAR_HORAS:g} h"
     ficha = ficha_paciente.load(user, estrito=True)
 
-    if espera_h >= FILA_RETOMAR_HORAS:
+    if ultima_acao or parada_h >= FILA_RETOMAR_HORAS:
         nova = ficha_paciente.nova(user)
         for campo in _FICHA_QUE_FICA:
             if ficha.get(campo):
                 nova[campo] = ficha[campo]
-        nova["saudacao_feita"] = True
+        # Depois de um atendimento da equipe a conversa e praticamente nova:
+        # cumprimenta. Na fila sem resposta (poucas horas) segue sem saudacao.
+        nova["saudacao_feita"] = not ultima_acao
+        consulta = _consulta_atual(user)
+        if consulta:
+            # Consulta marcada ou pedido na fila: o agente conta a situacao e
+            # ajuda com duvidas, sem refazer o funil (secretaria._retorno).
+            nova["status"] = "retorno"
+            nova["consulta"] = consulta
         ficha_paciente.save(user, nova, estrito=True)
         contato = database.get_contact(user)
         if contato:
@@ -1058,11 +1090,12 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> bool:
             conversation_id=conv["id"], phone=user, direction="internal", sender="system",
             msg_type="system",
             body=(f"Agente retomou o atendimento em {datetime.utcnow().strftime('%d/%m %H:%M')}: "
-                  f"a equipe nao respondeu em {FILA_RETOMAR_HORAS:g} h"))
+                  f"{motivo}"))
         events.emit("conversation_updated", {"conversation_id": conv["id"], "auto_mode": 1,
                                              "transferred": False})
-        print(f"[fila] user={user} equipe sem resposta ha {espera_h:.1f} h: agente retomou")
-        return True
+        print(f"[fila] user={user} {motivo} (parada {parada_h:.1f} h, "
+              f"consulta={consulta.get('situacao', '-')}): agente retomou")
+        return "" if (ultima_acao or consulta) else MENSAGEM_RETOMADA
 
     if ficha.get("aviso_fila_para") != transferido:
         ficha["aviso_fila_para"] = transferido
@@ -1071,7 +1104,7 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> bool:
         _responder_direto(user, items, MENSAGEM_FILA, chegada)
     else:
         print(f"[flush] user={user} modo=humano, aviso ja enviado; aguardando a equipe")
-    return False
+    return None
 
 
 def _responder_direto(user: str, items: list[dict], texto: str,

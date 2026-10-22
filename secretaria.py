@@ -152,6 +152,23 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
         if ficha.get("ultima_pergunta") == "exames":
             ficha["ultima_pergunta"] = ""
 
+    # ── 2b. Retorno: o agente retomou e o paciente tem consulta em andamento ──
+    # Quem volta com avaliacao marcada (ou pedido na fila da equipe) nao refaz
+    # o funil: ouve como esta a consulta e o agente ajuda no que cabe a ele.
+    if ficha.get("status") == "retorno":
+        consulta = ficha.get("consulta") or {}
+        pede_outra = bool(texto) and (
+            _RX_NOVA_CONSULTA.search(t) is not None
+            or (fp.RX_TERCEIRO.search(t) is not None
+                and clinica.classificar_intencao(texto) == "pronto_agendar"))
+        if consulta and not pede_outra:
+            return _retorno(ficha, d, texto, t, consulta, fechar)
+        # Sem consulta em andamento, ou pedindo outra: atendimento novo, com o
+        # cadastro que ja se tinha.
+        ficha["status"] = "coletando"
+        ficha.pop("consulta", None)
+        d.tipos.append("retorno:novo_atendimento")
+
     # ── 3. Confirmação do resumo (seção 18: CONFIRMAÇÃO) ─────────────────────
     if ficha.get("status") == "aguardando_confirmacao" and not midia:
         # Resposta ao dado que o paciente disse que faltava ou estava errado.
@@ -463,6 +480,79 @@ def _proximo_passo(ficha: dict, d: Decisao, cobre_queixa: bool, repetir: bool = 
     ficha["ultima_pergunta"] = "confirmacao"
     d.pergunta_final = fp.PERGUNTA_CONFIRMACAO
     d.tipos.append("resumo")
+
+
+# ── Retorno com consulta em andamento ─────────────────────────────────────────
+
+_DIAS_SEMANA = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+                "sexta-feira", "sábado", "domingo"]
+
+# Remarcar e cancelar ficam com a equipe: so ela mexe na agenda.
+_RX_MUDAR_CONSULTA = re.compile(
+    r"\b(remarc\w*|desmarc\w*|cancel\w*|adiar|adia[rm]?\b"
+    r"|(trocar|mudar|alterar|antecipar)\b.{0,25}\b(dia|data|horario|hora|consulta|avaliacao)"
+    r"|nao (vou|vai|irei) (poder|conseguir)|nao (posso|consigo) (ir|comparecer))")
+_RX_AGRADECIMENTO = re.compile(r"\b(obrigad\w*|valeu|agradec\w*|grat[oa])\b")
+_RX_NOVA_CONSULTA = re.compile(r"\b(outra|nova|mais uma|segunda) (consulta|avaliacao)\b")
+# "Que dia e a minha consulta?", "ja tem horario?": a resposta e a situacao.
+_RX_PERGUNTA_SITUACAO = re.compile(
+    r"\b(que dia|que horas|qual (e )?(o |a )?(dia|data|horario|hora)|quando (e|vai ser|sera)"
+    r"|(ja )?(tem|tenho|saiu) (o )?(horario|data|dia)"
+    r"|(esta|ta|foi|ficou|ja) (marcad|agendad|confirmad)\w*|minha (consulta|avaliacao))\b")
+
+MENSAGEM_RETORNO_MUDAR = ("Vou passar seu pedido para a equipe do Dr. Fabrício, que cuida "
+                          "da agenda e te responde por aqui.")
+MENSAGEM_RETORNO_AJUDA = "Se tiver alguma dúvida sobre a avaliação, é só me perguntar por aqui."
+
+
+def quando_por_extenso(inicio: str) -> str:
+    """'2026-10-08T09:00' -> 'quinta-feira, 08/10, às 09h00'."""
+    d = datetime.fromisoformat(inicio)
+    return f"{_DIAS_SEMANA[d.weekday()]}, {d.strftime('%d/%m')}, às {d.strftime('%Hh%M')}"
+
+
+def situacao_da_consulta(consulta: dict) -> str:
+    if consulta.get("situacao") == "marcada" and consulta.get("inicio"):
+        return ("Sua avaliação com o Dr. Fabrício está confirmada para "
+                f"{quando_por_extenso(consulta['inicio'])}.")
+    return ("Seu pedido de agendamento está com a equipe do Dr. Fabrício, que vai te "
+            "passar o dia e o horário por aqui.")
+
+
+def _retorno(ficha: dict, d: Decisao, texto: str, t: str, consulta: dict, fechar) -> Decisao:
+    situacao = consulta.get("situacao", "pendente")
+    d.tipos.append(f"retorno:{situacao}")
+    primeira = not ficha.get("retorno_avisado")
+    ficha["retorno_avisado"] = True
+    ficha["ultima_pergunta"] = ""
+
+    if texto and _RX_MUDAR_CONSULTA.search(t):
+        d.tipos.append("retorno:mudar_consulta")
+        d.partes.append(MENSAGEM_RETORNO_MUDAR)
+        alvo = (f"consulta de {quando_por_extenso(consulta['inicio'])}"
+                if situacao == "marcada" and consulta.get("inicio")
+                else "pedido de agendamento pendente")
+        d.transferir = f"Paciente quer remarcar/cancelar ({alvo}): {texto[:200]}"
+        return fechar()
+
+    perguntou_situacao = bool(texto) and _RX_PERGUNTA_SITUACAO.search(t) is not None
+    if primeira or perguntou_situacao:
+        d.partes.append(situacao_da_consulta(consulta))
+
+    travadas = clinica.respostas_travadas(texto) if texto else []
+    for tipo, resposta in travadas:
+        d.tipos.append(tipo)
+        d.partes.append(resposta)
+
+    if (texto and not travadas and not perguntou_situacao and tem_duvida_aberta(texto)
+            and not e_so_cumprimento(texto)):
+        d.usar_llm = True
+        d.tipos.append("llm")
+    elif not travadas and not perguntou_situacao:
+        if _RX_AGRADECIMENTO.search(t) and not primeira:
+            d.confirmacao = "Por nada!"
+        d.pergunta_final = MENSAGEM_RETORNO_AJUDA
+    return fechar()
 
 
 def montar(d: Decisao, texto_modelo: str = "") -> tuple[str, list[str]]:

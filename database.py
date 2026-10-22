@@ -1438,6 +1438,33 @@ def equipe_agiu_desde(conv_id: int, phone: str, desde: str) -> bool:
                              "AND updated_at > ? LIMIT 1", (phone, desde)))
 
 
+def ultima_acao_equipe(conv_id: int, phone: str, desde: str) -> str:
+    """Quando a equipe mexeu no caso pela ultima vez depois de `desde` (ISO UTC).
+    Mesmo criterio de equipe_agiu_desde; "" se nao mexeu."""
+    msg = db.fetch_one("SELECT MAX(created_at) AS quando FROM messages WHERE conversation_id=? "
+                       "AND sender='human' AND created_at > ?", (conv_id, desde))
+    ag = db.fetch_one("SELECT MAX(updated_at) AS quando FROM agendamentos WHERE phone=? "
+                      "AND status<>'pendente' AND updated_at > ?", (phone, desde))
+    return max(str((msg or {}).get("quando") or ""), str((ag or {}).get("quando") or ""))
+
+
+def consulta_do_paciente(phone: str, agora_local: str) -> dict | None:
+    """A consulta em andamento: a proxima confirmada, senao o pedido pendente.
+
+    `agora_local` e a hora do consultorio em ISO, como `inicio`. Consulta que
+    ja passou ou cancelada nao conta: o paciente volta como atendimento novo.
+    """
+    marcada = db.fetch_one("SELECT id, inicio FROM agendamentos WHERE phone=? AND status='confirmado' "
+                           "AND inicio >= ? ORDER BY inicio ASC LIMIT 1", (phone, agora_local))
+    if marcada:
+        return {"situacao": "marcada", "inicio": marcada["inicio"], "id": marcada["id"]}
+    pendente = db.fetch_one("SELECT id FROM agendamentos WHERE phone=? AND status='pendente' "
+                            "ORDER BY created_at DESC LIMIT 1", (phone,))
+    if pendente:
+        return {"situacao": "pendente", "inicio": "", "id": pendente["id"]}
+    return None
+
+
 def ids_eventos_google() -> set:
     """Eventos do Google que o painel criou (um por agendamento confirmado)."""
     linhas = db.fetch_all("SELECT google_event_id FROM agendamentos "

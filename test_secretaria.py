@@ -720,5 +720,65 @@ class TestFichaComBancoFora(unittest.TestCase):
         self.assertEqual(ficha["cpf"], "111.444.777-35")
 
 
+class RetornoComConsulta(unittest.TestCase):
+    """O agente retomou a conversa e o paciente tem consulta em andamento."""
+
+    def ficha(self, situacao="marcada", inicio="2026-10-08T09:00", saudou=False):
+        f = fp.nova("5562999999999")
+        f.update(nome="Ana", cpf="111.444.777-35", status="retorno", saudacao_feita=saudou,
+                 consulta={"situacao": situacao, "inicio": inicio if situacao == "marcada" else ""})
+        return f
+
+    def responder(self, ficha, texto):
+        d = secretaria.decidir(ficha, texto, TARDE)
+        return d, secretaria.montar(d, "")[0]
+
+    def test_consulta_marcada_cumprimenta_e_conta_o_dia(self):
+        d, texto = self.responder(self.ficha(), "Oi, boa tarde")
+        self.assertIn("confirmada para quinta-feira, 08/10, às 09h00", texto)
+        self.assertTrue(texto.startswith("Boa tarde"))
+        self.assertNotIn("queixa", d.tipos)
+        self.assertFalse(d.transferir)
+
+    def test_pedido_pendente_diz_que_esta_com_a_equipe(self):
+        _, texto = self.responder(self.ficha("pendente"), "Oi")
+        self.assertIn("Seu pedido de agendamento está com a equipe", texto)
+
+    def test_remarcar_vai_para_a_equipe(self):
+        d, texto = self.responder(self.ficha(saudou=True), "Preciso remarcar, não vou poder ir")
+        self.assertIn("retorno:mudar_consulta", d.tipos)
+        self.assertIn("08/10", d.transferir)
+        self.assertIn("cuida da agenda", texto)
+
+    def test_pergunta_do_dia_responde_a_situacao(self):
+        ficha = self.ficha(saudou=True)
+        self.responder(ficha, "oi")
+        d, texto = self.responder(ficha, "que dia é minha consulta?")
+        self.assertIn("08/10", texto)
+        self.assertFalse(d.usar_llm)
+
+    def test_duvida_vai_para_o_modelo_sem_reabrir_o_funil(self):
+        ficha = self.ficha(saudou=True)
+        self.responder(ficha, "oi")
+        d, _ = self.responder(ficha, "Preciso levar algum exame no dia?")
+        self.assertTrue(d.usar_llm)
+        self.assertEqual(ficha["status"], "retorno")
+        self.assertEqual(ficha["ultima_pergunta"], "")
+
+    def test_outra_consulta_reabre_o_funil_com_o_cadastro(self):
+        ficha = self.ficha(saudou=True)
+        d, _ = self.responder(ficha, "Quero marcar outra consulta")
+        self.assertIn("retorno:novo_atendimento", d.tipos)
+        self.assertEqual(ficha["status"], "coletando")
+        self.assertEqual(ficha["cpf"], "111.444.777-35")
+
+    def test_sem_consulta_volta_ao_atendimento_normal(self):
+        ficha = self.ficha(saudou=True)
+        ficha["consulta"] = {}
+        d, _ = self.responder(ficha, "Oi, queria saber sobre implante")
+        self.assertIn("retorno:novo_atendimento", d.tipos)
+        self.assertEqual(ficha["status"], "coletando")
+
+
 if __name__ == "__main__":
     unittest.main()
