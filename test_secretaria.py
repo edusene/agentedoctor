@@ -331,6 +331,18 @@ class Fluxo(unittest.TestCase):
         d = fp.extrair_cadastro("Ana Lima, 529.982.247-25, RG 12.345-678, Rua A, 10, Centro, 76820-000")
         self.assertEqual((d["rg"], d["cep"], d["endereco"]), ("12.345-678", "76820-000", "Rua A, 10, Centro"))
 
+    def test_teste_de_22_10_cep_solto_nao_vira_rg(self):
+        """O paciente pulou o RG e mandou o CEP solto; depois o endereco com o CEP."""
+        ficha, saidas = conversa(self.CONVERSA[:3] + [
+            "Carlos Pereira Lima\n08/11/2004\n529.982.247-25\n76808526\ncarlos@email.com",
+            "Rua Angico, 3170 - Eletronorte 76808526", "1234567"])
+        self.assertIn(fp.PERGUNTAS["endereco"], saidas[3][2])
+        self.assertIn(fp.PERGUNTAS["rg"], saidas[4][2])          # o RG ainda faltava
+        self.assertEqual(ficha["endereco"], "Rua Angico, 3170 - Eletronorte")
+        self.assertEqual(ficha["cep"], "76808-526")
+        self.assertEqual(ficha["rg"], "1234567")
+        self.assertIn("Cadastro completo", saidas[5][2])
+
     def test_sem_email_segue_o_cadastro(self):
         f = fp.nova("1")
         self.assertTrue(fp.capturar_resposta(f, "email", "não tenho e-mail"))

@@ -611,6 +611,22 @@ _PALAVRA_RESET_PADRAO = "#reset"
 _MENSAGEM_RESET_PADRAO = (
     "Prontinho, recomecei o atendimento do zero! " + ficha_paciente.PERGUNTAS["nome"]
 )
+# Textos que o painel gravou como "personalizados" so por salvar a tela com o
+# padrao antigo: valem como padrao.
+_MENSAGENS_RESET_ANTIGAS = {
+    "Prontinho, recomecei o atendimento do zero! Qual é o seu nome?",
+    _MENSAGEM_RESET_PADRAO,
+}
+
+
+def _mensagem_reset() -> str:
+    """Depois do #reset vem a saudacao do roteiro (teste de 22/10: o "Oi"
+    seguinte recebia so "Boa noite! Qual é o seu nome?", sem a apresentacao)."""
+    salva = (database.get_setting("reset_message", "") or "").strip()
+    if salva and salva not in _MENSAGENS_RESET_ANTIGAS:
+        return salva
+    return (f"Prontinho, recomecei o atendimento do zero!\n\n"
+            f"{secretaria.apresentacao(secretaria.agora())}\n\n{ficha_paciente.PERGUNTAS['nome']}")
 
 
 def palavra_de_reset() -> str:
@@ -671,7 +687,7 @@ def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> N
     if not avisar:
         return
 
-    resposta = database.get_setting("reset_message", "") or _MENSAGEM_RESET_PADRAO
+    resposta = _mensagem_reset()
     res = send_text(phone, resposta)
     if res.get("ok"):
         database.save_message(
@@ -1034,6 +1050,18 @@ _FICHA_QUE_FICA = ("nome", "nome_completo", "nascimento", "cpf", "rg", "email", 
                    "telefone")
 
 
+_RX_SO_CONFIRMACAO = _re_mod.compile(
+    r"^(ok+|okay|blz|beleza|certo|ta bom|ta|ta certo|combinado|perfeito|show|otimo|entendi"
+    r"|entendido|sim|obrigad[oa]|muito obrigad[oa]|obg|valeu|vlw|grat[oa]|aguardo|fico no aguardo"
+    r"|👍|🙏|😊|🙂)([\s,!.]+(ok+|obrigad[oa]|valeu|aguardo|👍|🙏|😊|🙂))*[\s!.]*$")
+
+
+def _so_confirmacao(items: list[dict]) -> bool:
+    """O lote e so "ok", "obrigado", "👍"? Nao pede resposta da fila."""
+    texto = clinica.normalizar(" ".join(str(it.get("text", "")) for it in items))
+    return bool(texto) and _RX_SO_CONFIRMACAO.match(texto) is not None
+
+
 def _horas_desde(iso_utc: str) -> float:
     try:
         return (datetime.utcnow() - datetime.fromisoformat(iso_utc)).total_seconds() / 3600
@@ -1098,6 +1126,11 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> str | None:
               f"consulta={consulta.get('situacao', '-')}): agente retomou")
         return "" if (ultima_acao or consulta) else MENSAGEM_RETOMADA
 
+    if _so_confirmacao(items):
+        # "ok" logo depois de "sua solicitacao foi encaminhada" (teste de
+        # 22/10): o aviso da fila so repetia o que o paciente acabou de ler.
+        print(f"[flush] user={user} modo=humano, so confirmacao; aguardando a equipe")
+        return None
     if ficha.get("aviso_fila_para") != transferido:
         ficha["aviso_fila_para"] = transferido
         ficha_paciente.save(user, ficha, estrito=True)

@@ -605,6 +605,7 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
                 ficha["aviso_cadastro"] = v
             elif not ficha.get(c):
                 ficha[c] = v
+        _rg_que_era_o_cep(ficha)
         return any(c != "_aviso" for c in achados)
 
     if campo == "tipo_consulta":
@@ -880,15 +881,6 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
         if cep:
             achados.setdefault("cep", cep)
             resto = resto.replace(m.group(0), " ")
-    if "endereco" in achados:
-        # "Rua X, 10, Centro, CEP 76820-000": o CEP vai para o campo dele.
-        for m in list(_RX_CEP.finditer(achados["endereco"])):
-            cep = _formatar_cep(m.group(1) or m.group(2))
-            if cep:
-                achados.setdefault("cep", cep)
-                achados["endereco"] = achados["endereco"].replace(m.group(0), " ")
-        achados["endereco"] = " ".join(achados["endereco"].split()).strip(" ,;.-")
-
     aviso_cpf = "O CPF informado parece ter algum número trocado. Pode conferir?"
     # CPF com rotulo: confere o digito verificador e padroniza.
     if "cpf" in achados:
@@ -961,6 +953,36 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
             # Resposta seca a "Qual é o CEP?": oito digitos valem, sem hifen.
             achados["cep"] = _formatar_cep(limpo)
 
+    if achados.get("endereco"):
+        _separar_cep_do_endereco(achados)
     if "nome_completo" in achados:
         achados["nome_completo"] = _titulo(achados["nome_completo"])
     return achados
+
+
+# Dentro do endereco, oito digitos soltos so podem ser o CEP ("Rua Angico,
+# 3170 - Eletronorte 76808526", teste de 22/10).
+_RX_CEP_NO_ENDERECO = re.compile(r"(?<![\d.\-])(\d{8})(?![\d\-])")
+
+
+def _separar_cep_do_endereco(achados: dict) -> None:
+    """"Rua X, 10, Centro, CEP 76820-000": o CEP vai para o campo dele."""
+    endereco = achados["endereco"]
+    for m in list(_RX_CEP.finditer(endereco)) + list(_RX_CEP_NO_ENDERECO.finditer(endereco)):
+        cep = _formatar_cep(next(g for g in m.groups() if g))
+        if cep:
+            achados.setdefault("cep", cep)
+            endereco = endereco.replace(m.group(0), " ")
+    achados["endereco"] = " ".join(endereco.split()).strip(" ,;.-")
+
+
+def _rg_que_era_o_cep(ficha: dict) -> None:
+    """Oito digitos soltos na lista do cadastro viram RG; se depois o CEP vem
+    com os mesmos digitos, aquele numero era o CEP e o RG ainda falta."""
+    rg = re.sub(r"\D", "", str(ficha.get("rg") or ""))
+    cep = re.sub(r"\D", "", str(ficha.get("cep") or ""))
+    if rg and rg == cep:
+        ficha["rg"] = ""
+        t = dict(ficha.get("tentativas") or {})
+        t.pop("rg", None)
+        ficha["tentativas"] = t
