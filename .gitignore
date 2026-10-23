@@ -49,3 +49,6 @@ Corre*Solicitadas/
 
 # Material original do cliente (o agente usa so knowledge/*.md)
 /*.pdf
+
+# Grafo do Graphify (gerado; regenere com o comando de docs/setup.md)
+graphify-out/

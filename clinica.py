@@ -27,6 +27,12 @@ PROFISSIONAL_COMPLETO = "Dr. Fabrício Guimarães"
 ESPECIALIDADE = "cirurgia bucomaxilofacial"
 
 
+def mascarar_fone(numero) -> str:
+    """Telefone para log: so o inicio e o fim (LGPD); o numero inteiro e dado de saude."""
+    n = str(numero or "")
+    return f"{n[:4]}...{n[-2:]}" if len(n) > 8 else "***"
+
+
 def normalizar(texto: str) -> str:
     """Minúsculas, sem acento, espaços simples. Toda comparação passa por aqui."""
     t = unicodedata.normalize("NFKD", str(texto or ""))

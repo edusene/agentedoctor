@@ -121,6 +121,13 @@ emergências, cada resposta travada, a conferência das respostas do modelo, o
 fluxo completo até o encaminhamento e a ausência de oscilação: a mesma conversa
 rodada 25 vezes tem de dar exatamente as mesmas respostas.
 
+## Documentação
+
+- [PRODUCT.md](PRODUCT.md) escopo e critérios · [AGENTS.md](AGENTS.md) instruções para agentes (`CLAUDE.md` as importa)
+- [docs/architecture.md](docs/architecture.md) estrutura · [docs/onboarding.md](docs/onboarding.md) preparo local · [docs/quality.md](docs/quality.md) verificações e segurança
+- [docs/design.md](docs/design.md) painel · [docs/setup.md](docs/setup.md) ferramentas, evidências e pendências
+- Verificação: `python verify.py` (sintaxe, pyflakes, segredos, testes sem rede e sem banco).
+
 ---
 
 ## Antes de colocar em produção (seção 20 da base)

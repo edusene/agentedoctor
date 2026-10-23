@@ -7,7 +7,7 @@ import hmac
 import os
 from functools import wraps
 
-from flask import session, redirect, url_for, request
+from flask import session, redirect, url_for
 
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 # Sem senha padrao: o codigo e publico, e uma senha escrita aqui vale para
@@ -41,6 +41,7 @@ def check_credentials(username: str, password: str) -> bool:
 def do_login(username: str, password: str) -> bool:
     """Tenta fazer login. Retorna True se bem-sucedido."""
     if check_credentials(username, password):
+        session.permanent = True
         session["logged_in"] = True
         session["username"] = username
         return True

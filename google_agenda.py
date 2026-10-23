@@ -22,6 +22,7 @@ O refresh token fica na tabela settings (nunca no código nem no git).
 
 from __future__ import annotations
 
+import hmac
 import os
 import time
 from datetime import datetime, timedelta
@@ -398,7 +399,7 @@ def renovar_avisos_se_preciso() -> None:
 
 def aviso_valido(canal_id: str, token: str) -> bool:
     esperado = database.get_setting("google_canal_token", "")
-    return bool(esperado) and token == esperado and canal_id == database.get_setting("google_canal_id", "")
+    return bool(esperado) and hmac.compare_digest(str(token).encode("utf-8"), esperado.encode("utf-8")) and canal_id == database.get_setting("google_canal_id", "")
 
 
 

@@ -49,7 +49,7 @@ function toast(message, type = 'info') {
         error: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
         info: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
     };
-    el.innerHTML = `${icons[type] || icons.info}<span>${message}</span><button class="toast-close" onclick="event.stopPropagation(); this.parentElement.remove()">&times;</button>`;
+    el.innerHTML = `${icons[type] || icons.info}<span>${esc(message)}</span><button class="toast-close" onclick="event.stopPropagation(); this.parentElement.remove()">&times;</button>`;
     el.addEventListener('click', e => e.stopPropagation());
     container.appendChild(el);
     setTimeout(() => { el.classList.add('toast-exit'); }, 3000);
@@ -62,7 +62,7 @@ function toastLoading(message) {
     const el = document.createElement('div');
     el.id = id;
     el.className = 'toast toast-loading';
-    el.innerHTML = `<span class="spinner toast-spinner"></span><span>${message}</span>`;
+    el.innerHTML = `<span class="spinner toast-spinner"></span><span>${esc(message)}</span>`;
     el.addEventListener('click', e => e.stopPropagation());
     container.appendChild(el);
     return id;
@@ -77,7 +77,7 @@ function toastDone(id, message, type = 'success') {
         warning: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
     };
     el.className = `toast toast-${type}`;
-    el.innerHTML = `${icons[type] || icons.success}<span>${message}</span><button class="toast-close" onclick="event.stopPropagation(); this.parentElement.remove()">&times;</button>`;
+    el.innerHTML = `${icons[type] || icons.success}<span>${esc(message)}</span><button class="toast-close" onclick="event.stopPropagation(); this.parentElement.remove()">&times;</button>`;
     setTimeout(() => { el.classList.add('toast-exit'); }, 3000);
     setTimeout(() => { el.remove(); }, 3400);
 }
@@ -269,7 +269,7 @@ async function loadConversations(autoMode = null) {
     }
     const html = conversations.map(c => {
         const name = c.contact_name || c.contact_phone;
-        const initials = name.slice(0, 2).toUpperCase();
+        const initials = esc(name.slice(0, 2).toUpperCase());
         const avatarBg = c.contact_avatar_color || '';
         const avatarStyle = avatarBg ? `background:${avatarBg}` : '';
         const avatar = c.contact_avatar

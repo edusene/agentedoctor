@@ -1,0 +1,22 @@
+# Nada de segredo, dado de paciente, dependencia ou saida gerada no grafo.
+.git/
+.venv/
+__pycache__/
+graphify-out/
+.claude/
+.agents/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pdf
+*.png
+*.jpg
+*.jpeg
+chat*.txt
+Corre*Solicitadas/

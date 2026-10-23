@@ -3,12 +3,12 @@ scheduler.py — APScheduler para automações CRM.
 Verifica follow-ups pendentes e executa envios automáticos.
 """
 
-import time
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import os
 
+import clinica
 import database
 import events
 
@@ -221,7 +221,7 @@ def check_follow_ups():
                         "contact_id": contact_id,
                         "automation_id": automation_id,
                     })
-                    print(f"[crm] follow-up {fu_id} enviado para {phone}")
+                    print(f"[crm] follow-up {fu_id} enviado para {clinica.mascarar_fone(phone)}")
                 else:
                     error_msg = _explicar_erro(result.get("error", "Erro desconhecido"))
                     database.update_follow_up_status(fu_id, "erro", error_message=error_msg)

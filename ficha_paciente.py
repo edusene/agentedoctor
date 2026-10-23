@@ -134,7 +134,7 @@ def _com_novas_tentativas(acao, oque: str, phone: str):
         except Exception as e:
             if espera is None:
                 raise FichaIndisponivel(f"{oque} de {phone}: {e}") from e
-            print(f"[ficha] WARN {oque} de {phone} falhou ({str(e).strip()[:80]}); "
+            print(f"[ficha] WARN {oque} de {clinica.mascarar_fone(phone)} falhou ({str(e).strip()[:80]}); "
                   f"nova tentativa em {espera}s")
             time.sleep(espera)
 
@@ -152,7 +152,7 @@ def load(phone: str, estrito: bool = False) -> dict:
     except FichaIndisponivel:
         raise
     except Exception as e:
-        print(f"[ficha] WARN nao leu ficha de {phone}: {e}")
+        print(f"[ficha] WARN nao leu ficha de {clinica.mascarar_fone(phone)}: {e}")
     ficha["telefone"] = ficha.get("telefone") or phone
     # Ficha gravada antes da trava de 14/10 pode ter o texto do pedido como
     # dado ("Endereço: rua, número, bairro e cidade)"): vale como vazio.
@@ -171,14 +171,14 @@ def save(phone: str, ficha: dict, estrito: bool = False) -> None:
     try:
         database.save_conversation_state(phone, {"ficha": ficha})
     except Exception as e:
-        print(f"[ficha] WARN nao salvou ficha de {phone}: {e}")
+        print(f"[ficha] WARN nao salvou ficha de {clinica.mascarar_fone(phone)}: {e}")
 
 
 def reset(phone: str) -> None:
     try:
         database.delete_conversation_state(phone)
     except Exception as e:
-        print(f"[ficha] WARN nao apagou ficha de {phone}: {e}")
+        print(f"[ficha] WARN nao apagou ficha de {clinica.mascarar_fone(phone)}: {e}")
 
 
 # ── Funil ────────────────────────────────────────────────────────────────────

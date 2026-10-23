@@ -800,7 +800,7 @@ def save_message(
     print(f"[db] save_message: msg_id={msg_id} wa_msg_clean={wa_msg_clean} direction={direction}")
     if msg_id:
         return db.fetch_one("SELECT * FROM messages WHERE id=?", (msg_id,))
-    print(f"[db] save_message: FALHA - msg_id is None!")
+    print("[db] save_message: FALHA - msg_id is None!")
     return None
 
 

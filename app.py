@@ -146,6 +146,22 @@ def _contexto_rag(texto: str) -> str:
     return trechos
 
 
+_LLM_POR_HORA = 12
+_llm_chamadas: dict[str, list[float]] = {}
+
+
+def _llm_dentro_do_limite(user: str) -> bool:
+    """Teto por numero (custo da OpenAI e tamanho do cache); acima dele vale a resposta travada generica."""
+    agora = time.time()
+    recentes = [t for t in _llm_chamadas.get(user, []) if agora - t < 3600]
+    if len(recentes) >= _LLM_POR_HORA:
+        _llm_chamadas[user] = recentes
+        return False
+    recentes.append(agora)
+    _llm_chamadas[user] = recentes
+    return True
+
+
 def _chave_resposta_aberta(texto: str) -> str:
     """Chave da resposta travada de uma duvida aberta.
 
@@ -406,7 +422,7 @@ def transcribe_audio(b64_data: str, mime: str) -> str:
             prompt=_vocabulario_do_audio(),
         )
         text = (resp.text or "").strip()
-        print(f"[transcribe] len={len(text)} preview={text[:80]}")
+        print(f"[transcribe] len={len(text)}")
         return text
     except Exception as e:
         print(f"[transcribe] ERRO: {e}")
@@ -414,7 +430,6 @@ def transcribe_audio(b64_data: str, mime: str) -> str:
 
 
 def _build_user_parts(items: list[dict]) -> list[dict]:
-    import re as _re
     parts = []
     seen_media = set()
 
@@ -545,7 +560,7 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
     """
     contact = database.get_contact(phone)
     if contact and not contact.get("auto_mode", 1):
-        print(f"[transfer] user={phone} já está em modo humano, ignorando")
+        print(f"[transfer] user={clinica.mascarar_fone(phone)} já está em modo humano, ignorando")
         return False
 
     now = datetime.utcnow().isoformat()
@@ -569,7 +584,7 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
     database.mark_unread(conv["id"])
 
     reason_log = f" Motivo: {reason}" if reason else ""
-    print(f"[transfer] user={phone} transferido para humano.{reason_log}")
+    print(f"[transfer] user={clinica.mascarar_fone(phone)} transferido para humano.{reason_log}")
 
     # Mensagem interna no chat (não visível ao cliente)
     internal_body = f"Transferido pelo agente em {now_fmt}"
@@ -601,7 +616,7 @@ def perform_transfer(phone: str, reason: str = "", send_message: bool = True) ->
             )
             database.update_conversation(conv["id"], last_message_at=database.agora_utc())
         else:
-            print(f"[transfer] WARN: falha ao enviar msg de transferência p/ {phone}: {res.get('error')}")
+            print(f"[transfer] WARN: falha ao enviar msg de transferência p/ {clinica.mascarar_fone(phone)}: {res.get('error')}")
     # Sem envio (agendamento confirmado, emergencia): o paciente ja recebeu a
     # mensagem do proprio agente. Antes a de transferencia era GRAVADA como
     # enviada mesmo assim - aparecia no painel e nunca chegava no WhatsApp
@@ -696,7 +711,7 @@ def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> N
         "reset_at": agora_iso,
     })
 
-    print(f"[reset] user={phone} atendimento zerado e agente reativado ({origem})")
+    print(f"[reset] user={clinica.mascarar_fone(phone)} atendimento zerado e agente reativado ({origem})")
 
     if not avisar:
         return
@@ -721,9 +736,9 @@ def perform_reset(phone: str, origem: str = "cliente", avisar: bool = True) -> N
             ficha_paciente.marcar_pergunta(ficha, "nome")
             ficha_paciente.save(phone, ficha)
         except Exception as e:
-            print(f"[reset] WARN nao marcou saudacao de {phone}: {e}")
+            print(f"[reset] WARN nao marcou saudacao de {clinica.mascarar_fone(phone)}: {e}")
     else:
-        print(f"[reset] WARN falha ao confirmar reset p/ {phone}: {res.get('error')}")
+        print(f"[reset] WARN falha ao confirmar reset p/ {clinica.mascarar_fone(phone)}: {res.get('error')}")
 
 # ── Envio ───────────────────────────────────────────────────────────────────
 
@@ -780,7 +795,7 @@ def enviar_em_blocos(user: str, texto: str, chegada: float | None = None) -> Non
             _esperar_piso(chegada)
         res = _enviar_com_retentativa(user, chunk)
         if not res.get("ok"):
-            print(f"[flush] ERRO ao enviar p/ {user}: {res.get('error')}")
+            print(f"[flush] ERRO ao enviar p/ {clinica.mascarar_fone(user)}: {res.get('error')}")
             # Fica no painel marcada com erro: a equipe ve que o paciente
             # nao recebeu, em vez de a resposta sumir sem rastro.
             enviados.append((chunk, "error"))
@@ -799,7 +814,7 @@ def _espelhar_no_painel(user: str, enviados: list[tuple[str, str]]) -> None:
         try:
             send_msg_out_to_panel(user, chunk, status=status)
         except Exception as e:
-            print(f"[painel] WARN nao espelhou resposta p/ {user}: {e}")
+            print(f"[painel] WARN nao espelhou resposta p/ {clinica.mascarar_fone(user)}: {e}")
 
 
 # Falha passageira da Datafy (rede, timeout, 429, 5xx): tenta de novo antes de
@@ -813,7 +828,7 @@ def _enviar_com_retentativa(user: str, texto: str) -> dict:
         status = res.get("status") or 0
         if res.get("ok") or not (status == 0 or status == 429 or status >= 500):
             break
-        print(f"[flush] envio p/ {user} falhou ({res.get('error')}); nova tentativa em {espera}s")
+        print(f"[flush] envio p/ {clinica.mascarar_fone(user)} falhou ({res.get('error')}); nova tentativa em {espera}s")
         time.sleep(espera)
         res = send_text(user, texto)
     return res
@@ -886,7 +901,7 @@ def _registrar_encaminhamento(user: str, ficha: dict) -> None:
         )
         events.emit("agendamento_atualizado", {"id": ag["id"] if ag else None, "status": "pendente"})
     except Exception as e:
-        print(f"[agendamento] ERRO ao registrar pedido de {user}: {e}")
+        print(f"[agendamento] ERRO ao registrar pedido de {clinica.mascarar_fone(user)}: {e}")
     perform_transfer(user, reason=titulo, send_message=False)
 
 
@@ -902,12 +917,12 @@ def _falha_de_banco(e: Exception) -> bool:
 def _tentar_de_novo(user: str, items: list[dict], erro: Exception) -> None:
     tentativa = max((it.get("tentativas", 0) for it in items), default=0) + 1
     if tentativa > _REAGENDAR_MAX:
-        print(f"[flush] ERRO banco fora ha {_REAGENDAR_MAX} tentativas; desisti de {user}: {erro}")
+        print(f"[flush] ERRO banco fora ha {_REAGENDAR_MAX} tentativas; desisti de {clinica.mascarar_fone(user)}: {erro}")
         return
     for it in items:
         it["tentativas"] = tentativa
     atraso = min(10 * tentativa, 60)
-    print(f"[flush] banco indisponivel p/ {user} ({str(erro).strip()[:100]}); "
+    print(f"[flush] banco indisponivel p/ {clinica.mascarar_fone(user)} ({str(erro).strip()[:100]}); "
           f"tentativa {tentativa} em {atraso}s, sem responder antes disso")
     buffer.reagendar(user, items, atraso)
 
@@ -925,7 +940,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
     try:
         global_mode = int(database.get_setting("agent_mode", "1"))
         if not global_mode:
-            print(f"[flush] user={user} agente GLOBAL desligado, ignorando")
+            print(f"[flush] user={clinica.mascarar_fone(user)} agente GLOBAL desligado, ignorando")
             return
 
         contact = database.get_contact(user)
@@ -944,7 +959,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         # ── Palavras-chave de transferencia (antes de tudo) ─────────────────
         matched_kw = _check_transfer_keywords(items)
         if matched_kw:
-            print(f"[flush] user={user} keyword de transferência detectada: '{matched_kw}'")
+            print(f"[flush] user={clinica.mascarar_fone(user)} keyword de transferência detectada: '{matched_kw}'")
             respondeu = True
             perform_transfer(user, reason=f"paciente mencionou '{matched_kw}'")
             return
@@ -959,7 +974,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if not texto and not midia and any(
                 str(it.get("text", "")).startswith("[Audio") for it in items):
             midia = "audio_falhou"
-        print(f"[flush] user={user} texto={texto[:120]!r} midia={midia or '-'}")
+        print(f"[flush] user={clinica.mascarar_fone(user)} texto_len={len(texto)} midia={midia or '-'}")
 
         ficha = ficha_paciente.load(user, estrito=True)
         if ficha.get("status") == "retorno":
@@ -967,7 +982,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # retomada: a situacao vem sempre fresca do banco.
             ficha["consulta"] = _consulta_atual(user)
         decisao = secretaria.decidir(ficha, texto, secretaria.agora(), midia=midia)
-        print(f"[secretaria] user={user} decisao={decisao.tipos} "
+        print(f"[secretaria] user={clinica.mascarar_fone(user)} decisao={decisao.tipos} "
               f"llm={decisao.usar_llm} proxima={ficha.get('ultima_pergunta')!r}")
 
         texto_modelo = ""
@@ -975,8 +990,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if decisao.usar_llm:
             texto_modelo = database.get_setting(chave_cache, "")
             if texto_modelo:
-                print(f"[trava] user={user} duvida aberta respondida do cache (sem OpenAI)")
-        if decisao.usar_llm and not texto_modelo:
+                print(f"[trava] user={clinica.mascarar_fone(user)} duvida aberta respondida do cache (sem OpenAI)")
+        if decisao.usar_llm and not texto_modelo and not _llm_dentro_do_limite(user):
+            print(f"[trava] user={clinica.mascarar_fone(user)} limite de chamadas ao modelo; resposta travada generica")
+        elif decisao.usar_llm and not texto_modelo:
             system = (
                 _get_current_system_prompt()
                 + "\n\n=== BASE OFICIAL (trechos recuperados da base de conhecimento) ===\n"
@@ -996,12 +1013,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
             except Exception as e:
                 # Modelo fora do ar (429, rede): a duvida recebe a resposta
                 # travada generica e o funil segue - nunca silencio.
-                print(f"[flush] ERRO llm p/ {user}: {e}")
+                print(f"[flush] ERRO llm p/ {clinica.mascarar_fone(user)}: {e}")
 
         mensagem, violacoes = secretaria.montar(decisao, texto_modelo)
         if violacoes:
-            print(f"[trava] user={user} resposta do modelo BARRADA {violacoes}: "
-                  f"{texto_modelo[:160]!r}")
+            print(f"[trava] user={clinica.mascarar_fone(user)} resposta do modelo BARRADA {violacoes} "
+                  f"(resposta com {len(texto_modelo)} chars)")
 
         # Gravada ANTES de responder: se o banco nao aceitar, o paciente nao
         # recebe uma resposta que a ficha nao lembra (21/10).
@@ -1015,7 +1032,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if mensagem:
             enviar_em_blocos(user, mensagem, _chegada)
         _agora = time.monotonic()
-        print(f"[tempo] user={user} total={_agora - _chegada:.1f}s | ate o flush="
+        print(f"[tempo] user={clinica.mascarar_fone(user)} total={_agora - _chegada:.1f}s | ate o flush="
               f"{_inicio_flush - _chegada:.1f}s | banco={_banco_seg:.1f}s em {_banco_idas} idas | "
               f"ia={_seg_ia:.1f}s | envio={_agora - _t_envio:.1f}s | {decisao.tipos}")
 
@@ -1049,12 +1066,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
             database.reset_unread(conv["id"])
             events.emit("conversation_updated", {"conversation_id": conv["id"], "unread_count": 0})
         except Exception as e:
-            print(f"[flush] WARN reset_unread falhou p/ {user}: {e}")
+            print(f"[flush] WARN reset_unread falhou p/ {clinica.mascarar_fone(user)}: {e}")
     except Exception as e:
         if not respondeu and _falha_de_banco(e):
             _tentar_de_novo(user, items, e)
             return
-        print(f"[flush] ERRO inesperado p/ {user}: {e}")
+        print(f"[flush] ERRO inesperado p/ {clinica.mascarar_fone(user)}: {e}")
         import traceback
         traceback.print_exc()
 
@@ -1109,13 +1126,13 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> str | None:
     transferido = conv.get("transferred_at") or ""
     if not transferido:
         # Modo humano ligado a mao pelo painel: a equipe esta com a conversa.
-        print(f"[flush] user={user} modo=humano (sem transferencia), ignorando agente")
+        print(f"[flush] user={clinica.mascarar_fone(user)} modo=humano (sem transferencia), ignorando agente")
         return None
     ultima_acao = database.ultima_acao_equipe(conv["id"], user, transferido)
     if ultima_acao:
         parada_h = _horas_desde(ultima_acao)
         if parada_h < FILA_EQUIPE_INATIVA_HORAS:
-            print(f"[flush] user={user} modo=humano, equipe ja atendendo")
+            print(f"[flush] user={clinica.mascarar_fone(user)} modo=humano, equipe ja atendendo")
             return None
         motivo = f"a equipe nao fala com o paciente ha {FILA_EQUIPE_INATIVA_HORAS:g} h"
     else:
@@ -1149,22 +1166,22 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> str | None:
                   f"{motivo}"))
         events.emit("conversation_updated", {"conversation_id": conv["id"], "auto_mode": 1,
                                              "transferred": False})
-        print(f"[fila] user={user} {motivo} (parada {parada_h:.1f} h, "
+        print(f"[fila] user={clinica.mascarar_fone(user)} {motivo} (parada {parada_h:.1f} h, "
               f"consulta={consulta.get('situacao', '-')}): agente retomou")
         return "" if (ultima_acao or consulta) else MENSAGEM_RETOMADA
 
     if _so_confirmacao(items):
         # "ok" logo depois de "sua solicitacao foi encaminhada" (teste de
         # 22/10): o aviso da fila so repetia o que o paciente acabou de ler.
-        print(f"[flush] user={user} modo=humano, so confirmacao; aguardando a equipe")
+        print(f"[flush] user={clinica.mascarar_fone(user)} modo=humano, so confirmacao; aguardando a equipe")
         return None
     if ficha.get("aviso_fila_para") != transferido:
         ficha["aviso_fila_para"] = transferido
         ficha_paciente.save(user, ficha, estrito=True)
-        print(f"[fila] user={user} aguardando a equipe: aviso enviado")
+        print(f"[fila] user={clinica.mascarar_fone(user)} aguardando a equipe: aviso enviado")
         _responder_direto(user, items, MENSAGEM_FILA, chegada)
     else:
-        print(f"[flush] user={user} modo=humano, aviso ja enviado; aguardando a equipe")
+        print(f"[flush] user={clinica.mascarar_fone(user)} modo=humano, aviso ja enviado; aguardando a equipe")
     return None
 
 
@@ -1366,13 +1383,18 @@ def _extract_body_from_meta_message(msg_data: dict) -> tuple[str, str, str]:
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = bool(os.getenv("RENDER"))  # Render define RENDER=true
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # uploads de PDF/DOCX do knowledge
 
 def _ip_do_cliente() -> str:
     # Atras do proxy do Render todo mundo chegava com o mesmo endereco: o limite
     # de 200/min era do painel INTEIRO, e estourar devolvia 429 em HTML - a
     # Agenda falhava em silencio e so voltava no minuto seguinte.
+    # O primeiro item do X-Forwarded-For e o cliente quem escreve (forjavel); o
+    # ultimo e o que o proxy do Render acrescentou com o IP real.
     encaminhado = request.headers.get("X-Forwarded-For", "")
-    return encaminhado.split(",")[0].strip() if encaminhado else get_remote_address()
+    return encaminhado.split(",")[-1].strip() if encaminhado else get_remote_address()
 
 
 limiter = Limiter(_ip_do_cliente, app=app, default_limits=["200 per minute"],
@@ -1430,6 +1452,7 @@ def add_security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000"
     return response
 
 
@@ -1450,9 +1473,8 @@ def webhook():
 
     # Antes, pedido SEM assinatura pulava a checagem: qualquer um podia se
     # passar por paciente e fazer o bot mandar mensagem pelo numero do consultorio.
-    if (DATAFY_WEBHOOK_SECRET and WEBHOOK_EXIGE_ASSINATURA
-            and not (signature and timestamp)):
-        print("[webhook] Recusado: pedido sem assinatura (Datafy)")
+    if WEBHOOK_EXIGE_ASSINATURA and not (DATAFY_WEBHOOK_SECRET and signature and timestamp):
+        print("[webhook] Recusado: sem assinatura ou DATAFY_WEBHOOK_SECRET nao definido")
         return "Forbidden", 401
 
     if DATAFY_WEBHOOK_SECRET and signature and timestamp:
@@ -1526,13 +1548,13 @@ def webhook():
             body, msg_type, wa_media_id = _extract_body_from_meta_message(msg_data)
 
             if not body:
-                print(f"[webhook] SEM BODY: msg_type={msg_type} from={number}")
+                print(f"[webhook] SEM BODY: msg_type={msg_type} from={clinica.mascarar_fone(number)}")
                 continue
 
             _chegou_em = time.monotonic()
-            print(f"[webhook] from={number} ({push_name}) type={msg_type} len={len(body)} msg_id={message_id[:30]}")
+            print(f"[webhook] from={clinica.mascarar_fone(number)} type={msg_type} len={len(body)} msg_id={message_id[:30]}")
             if not _primeira_entrega(str(message_id)):
-                print(f"[webhook] REENTREGA ignorada (memoria) wamid={message_id} from={number}")
+                print(f"[webhook] REENTREGA ignorada (memoria) wamid={message_id} from={clinica.mascarar_fone(number)}")
                 continue
 
             # Marca como lido em background. E uma chamada de rede a Datafy
@@ -1567,7 +1589,7 @@ def webhook():
                     wa_media_id=wa_media_id,
                 )
             except Exception as e:
-                print(f"[webhook] ERRO banco ao gravar mensagem de {number}: {e}; "
+                print(f"[webhook] ERRO banco ao gravar mensagem de {clinica.mascarar_fone(number)}: {e}; "
                       f"segue para o atendimento sem gravar")
                 contact = conv = saved = None
                 _banco_fora = True
@@ -1631,7 +1653,7 @@ def webhook():
                     "body": body,
                     "message_id": str(message_id),
                 })
-                print(f"[webhook] MSG SALVA conv={conv['id']} from={number} len={len(body)}")
+                print(f"[webhook] MSG SALVA conv={conv['id']} from={clinica.mascarar_fone(number)} len={len(body)}")
             elif not _ja_processada:
                 print(f"[webhook] MSG NAO GRAVADA msg_id={message_id}")
 
@@ -1643,7 +1665,7 @@ def webhook():
                 try:
                     perform_reset(number, origem="cliente")
                 except Exception as e:
-                    print(f"[reset] ERRO ao reiniciar {number}: {e}")
+                    print(f"[reset] ERRO ao reiniciar {clinica.mascarar_fone(number)}: {e}")
                 continue
 
     return jsonify({"ok": True})
@@ -1776,7 +1798,6 @@ def api_conversations_mark_read(conv_id):
     if conv:
         contact = database.get_contact_by_id(conv["contact_id"])
         if contact and contact.get("phone"):
-            number = str(contact["phone"])
             # Busca a ultima mensagem RECEBIDA para mark_read na Meta
             # (nao usa a ultima mensagem da conversa, que pode ser enviada pelo agente)
             import db as _db
@@ -2096,7 +2117,7 @@ def api_messages_send():
     res = send_text(phone, body)
     if not res.get("ok"):
         err = res.get("error") or "Falha ao enviar mensagem."
-        print(f"[api] ERRO ao enviar p/ {phone}: {err}")
+        print(f"[api] ERRO ao enviar p/ {clinica.mascarar_fone(phone)}: {err}")
         return jsonify({"error": err}), (res.get("status") or 500)
 
     # Extrai wa_id da resposta Meta
@@ -2106,7 +2127,7 @@ def api_messages_send():
     messages_res = data_res.get("messages", [])
     meta_msg_id = messages_res[0].get("id", "") if messages_res else ""
 
-    contact = database.upsert_contact(wa_id)
+    database.upsert_contact(wa_id)
     conv = database.get_or_create_conversation(wa_id)
     database.save_message(
         conversation_id=conv["id"],
@@ -2153,7 +2174,7 @@ def api_messages_send_media():
     
     if not upload_result.get("ok"):
         err = upload_result.get("error", "Erro ao fazer upload da midia")
-        print(f"[api] ERRO upload media p/ {phone}: {err}")
+        print(f"[api] ERRO upload media p/ {clinica.mascarar_fone(phone)}: {err}")
         return jsonify({"error": err}), (upload_result.get("status") or 500)
     
     media_id = upload_result.get("data", {}).get("id", "")
@@ -2176,7 +2197,7 @@ def api_messages_send_media():
     
     if not res.get("ok"):
         err = res.get("error") or "Falha ao enviar midia."
-        print(f"[api] ERRO ao enviar media p/ {phone}: {err}")
+        print(f"[api] ERRO ao enviar media p/ {clinica.mascarar_fone(phone)}: {err}")
         return jsonify({"error": err}), (res.get("status") or 500)
     
     # Extrai wa_id da resposta Meta
@@ -2187,7 +2208,7 @@ def api_messages_send_media():
     meta_msg_id = messages_res[0].get("id", "") if messages_res else ""
     
     # Salva no banco
-    contact = database.upsert_contact(wa_id)
+    database.upsert_contact(wa_id)
     conv = database.get_or_create_conversation(wa_id)
     
     # Corpo da mensagem
@@ -2455,7 +2476,6 @@ def api_knowledge_create():
     filename = data.get("filename", "").strip()
     content = data.get("content", "")
     description = data.get("description", "").strip()
-    skip_embed = data.get("skip_embed", True)
     if not filename:
         return jsonify({"error": "filename obrigatorio"}), 400
     if not filename.endswith(('.md', '.txt')):
@@ -2668,7 +2688,7 @@ def _avisar_paciente(ag: dict, texto: str) -> bool:
     """Manda a mensagem ao paciente e registra no painel. False se nao saiu."""
     res = send_text(ag["phone"], texto)
     if not res.get("ok"):
-        print(f"[agenda] WARN aviso ao paciente {ag['phone']} nao saiu: {res.get('error')}")
+        print(f"[agenda] WARN aviso ao paciente {clinica.mascarar_fone(ag['phone'])} nao saiu: {res.get('error')}")
         return False
     conv_id = ag.get("conversation_id") or database.get_or_create_conversation(ag["phone"])["id"]
     database.save_message(conversation_id=conv_id, phone=ag["phone"], direction="out",
@@ -3399,6 +3419,8 @@ def api_whatsapp_config_post():
     for key, _, _ in _ENV_KEYS:
         if key in data:
             val = str(data[key]).strip()
+            if "\n" in val or "\r" in val:
+                return jsonify({"ok": False, "error": "Valor invalido (quebra de linha)"}), 400
             if val.startswith("*" * 4):
                 continue
             updates[key] = val
