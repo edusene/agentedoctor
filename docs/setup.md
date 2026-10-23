@@ -19,25 +19,25 @@
 |---|---|---|---|
 | Superpowers | Reuso (plugin 7.0.0); brainstorming invocado, usuário dispensou perguntas | Usuário | Validado: skill carregada nesta sessão |
 | Subagentes | Usados com critério: review de segurança (Opus) e smoke (Haiku) | Sessão | Validado: ambos retornaram; escritor único, revisores só leitura |
-| RTK | Reuso: 1.0.1 instalado globalmente (`~/.local/bin/rtk`), instruções em `~/.claude/RTK.md` importadas pelo CLAUDE.md global, hook no `settings.json` do usuário. Não duplicado no projeto | Usuário | Configurado e carregado; saída condensada observada nesta sessão. Para saída original: `rtk bypass <cmd>` |
+| RTK | Reuso: 1.0.1 instalado globalmente, instruções em `~/.claude/RTK.md` importadas pelo CLAUDE.md global, hook no `settings.json` do usuário | Usuário | Configurado e em uso nesta sessão; saída condensada observada. Para a saída original: `rtk bypass <cmd>` |
 | Ponytail | Reuso (plugin, `full`) | Usuário | Validado: hook de sessão ativo |
 | Caveman | Reuso (plugin) | Usuário | Validado: hook ativo. Docs e código em linguagem normal |
 | ESLint/Biome | Inapplicável (sem JS/TS na aplicação) | — | `static/app.js` validado com `node --check`; pyflakes cobre o Python |
-| Graphify | CLI global 0.9.95 reutilizada; `.graphifyignore` criado; grafo só de código | Projeto (`graphify-out/`, ignorado no git) | Validado: 25 arquivos de código, 1329 nós, 3434 arestas, sem clusters; consulta `query` respondeu; varredura de segredos no `graph.json`: 0. Docs (`*.md`) fora (modo sem LLM). Regenerar com o comando do `AGENTS.md` |
+| Graphify | CLI global 0.9.95 reutilizada; `.graphifyignore`; grafo completo com 2 subagentes Sonnet para os documentos (2026-10-23) | Projeto (`graphify-out/`, ignorado no git) | Validado: 1571 nós, 3795 arestas, 83 comunidades, `query` respondeu; 0 segredos no `graph.json`. Aviso de saúde: 200 arestas com ponta pendente e 45 colapsadas. Um subagente só varreu por busca as linhas 30–360 de `templates/index.html`. Grafo anterior às correções de 2026-10-23 (tarde); regenerar com `/graphify . --update` |
 | Obsidian | Inapplicável (sem necessidade nem destino autorizado) | — | — |
 | Memória do Claude | Reuso: memória nativa do projeto (`~/.claude/projects/.../memory/`, índice `MEMORY.md`, 7 entradas + 1 nova) | Usuário | Validado: carregada no início da sessão. Fatos duráveis no repo ficam em `AGENTS.md`/docs |
 | Hooks do cliente | Não adotados (nenhuma necessidade; evita interceptadores duplicados) | — | — |
-| agent-browser / Chrome DevTools MCP | Não instalados. Há extensão Chrome do Claude disponível; fluxo de UI do painel **não** foi exercitado em navegador | — | Parcial: rotas e cabeçalhos testados com o cliente de teste do Flask (abaixo) |
-| Context7 | Reuso do plugin (MCP) | Usuário | Configurado e carregado; sem consulta real nesta rodada. Não duplicado em `.mcp.json` |
+| agent-browser | agent-browser 0.39.2 (global, já instalado) + Chrome 155; sessão nomeada própria, app em SQLite descartável na porta 5099 | Máquina | Validado: login, logout POST, 9 telas, sem erros de JS, auditoria de acessibilidade, contraste e foco por teclado. Corrigidos 9 controles sem nome, botão "Sair" e contraste (3,9:1 → 6:1). Chrome DevTools MCP não usado (sem necessidade) |
+| Context7 | Reuso do plugin (MCP) | Usuário | Validado: 2 consultas reais (Flask-Limiter e Flask). Resultado: trocar o parser manual de `X-Forwarded-For` por `ProxyFix(x_for=1)`; `request.max_content_length` por requisição confirmado |
 | Anthropic skills / skill-creator / extras | Disponíveis globalmente; nenhuma necessidade do projeto | Usuário | Não instalados no projeto, por decisão |
 | Vercel skills / find-skills | Inapplicável (não é React/Next) | — | — |
 | next-dev-loop, next-bundle-optimizer | Inapplicável (sem Next.js) | — | — |
 | supabase-postgres-best-practices | Reuso: skill descoberta pelo cliente nesta sessão; roteada em `AGENTS.md` | Usuário | Descoberta confirmada; **execução real não feita** (nenhuma mudança de esquema) |
 | gh-fix-ci | Inapplicável agora: sem `gh` instalado e sem Codex; CI só criado | — | Bloqueado até haver `gh` autenticado e uma execução de CI |
-| differential-review | Não instalada; revisão manual por subagente como alternativa explícita | — | Revisão baseline feita (abaixo) |
+| differential-review | Skill do Trail of Bits (`trailofbits/skills` @ `196a907`, CC BY-SA 4.0), fonte lida antes; copiada para `.claude/skills/differential-review/` (local, fora do git) | Projeto (local) | Validado por execução: revisão do intervalo `dc15356..HEAD` por subagente Opus que seguiu o `SKILL.md` (não é prova de que o cliente a descobre como skill registrada; verificar em nova sessão). Relatório privado fora do repo. 14 achados; os válidos foram corrigidos |
 | shadcn | Inapplicável (sem UI de componentes) | — | — |
 | Sentry MCP | Não adotado: sem serviço Sentry escolhido | — | Pendente de decisão do responsável |
-| Harness2 (método nativo) | Adotado em modo nativo: procedimento em `docs/quality.md` | Projeto | Smoke abaixo. CLI oficial e benchmarks não selecionados (custo/isolamento) |
+| Harness2 (método nativo) | Adotado em modo nativo: procedimento em `docs/quality.md` | Projeto | Caso "boundary fix" executado por subagente Sonnet em cópia descartável: baseline com 2 falhas esperadas, final 7/7 no avaliador do toolkit, `local-notes.txt` e `AGENTS.md` intactos. Um caso, um modelo: não prova confiabilidade geral. CLI oficial e benchmarks não selecionados (custo/isolamento) |
 | Revisão de segurança | Prompt copiado para `docs/prompts/security-review.md` (revisão `790a895`) | Projeto | Baseline executada, relatório privado fora do repo |
 
 ## Documentação criada
@@ -48,7 +48,7 @@ PRODUCT.md, README.md (links adicionados), AGENTS.md, CLAUDE.md, docs/architectu
 
 | Item | Antes | Depois |
 |---|---|---|
-| Testes | 106 OK (`test_secretaria`, `test_horarios`) | 122 OK (+2 detector de segredos, +13 em `test_app.py`, +1 guarda de saída) |
+| Testes | 106 OK (`test_secretaria`, `test_horarios`) | 124 OK (+2 detector de segredos, +15 em `test_app.py`, +1 guarda de saída) |
 | pyflakes | 8 avisos | 0 |
 | Segredos nos versionados | não verificado | 0 (detector em `verify.py`, com teste) |
 | `pip-audit -r requirements.txt` | não verificado | nenhuma vulnerabilidade conhecida (venv temporário) |
@@ -79,11 +79,16 @@ Nada crítico; sem segredo ativo no histórico. Corrigido nesta entrega (testes 
 - **Acessibilidade do painel (revisão estática)**: 12 botões só com ícone ganharam `aria-label`; foco visível (`:focus-visible`) global. Contraste, ordem de foco e leitor de tela **não** foram testados em navegador.
 - `requirements.lock` regenerado com `cryptography`.
 
+## Revisão diferencial (2026-10-23, `dc15356..f9859ce`) — correções aplicadas
+
+Dos 14 achados, corrigidos: segredo do webhook lido na hora (rotação pelo painel não exige reinício) e aviso na subida se faltar; `/webhook` fora do limite global de 200/min; teto do cache de respostas só da versão atual; `conectado()` pelo token legível; chave de cifra rejeita o placeholder e avisa quando o token fica sem cifra; telefone mascarado em `buffer.py`, `database.py`, `memory.py` e `ficha_paciente.py`; guarda de preço cobre "cinquenta reais", "trezentos e cinquenta reais" e "350,00"; MIME de documentos (txt, Word, Excel) permitido; `flask>=3.1.0` (o `max_content_length` por requisição exige 3.1); teste do editor de `.env` sem tocar o `.env` real; testes de pedido assinado e de rotação do segredo. Aceitos sem mudança: teto de 25 MB em uploads (F14) e contador de chamadas ao modelo em memória (F7).
+
 ## Pendências e próxima entrega
 
 | Item | Causa | Próxima ação |
 |---|---|---|
 | F2: confirmar `DATAFY_WEBHOOK_SECRET` no Render | Sem acesso ao painel do Render daqui | Após o deploy, uma mensagem de teste deve chegar; se o log mostrar `Recusado`, definir a variável |
+| Rate limit do login assume 1 salto de proxy (`ProxyFix(x_for=1)`) | Não dá para ver o `X-Forwarded-For` real do Render daqui; com Cloudflare na frente o IP seria compartilhado e o limite de 5/min viraria global | Conferir o cabeçalho nos logs do Render e ajustar `x_for` |
 | Cookie `Secure` depende de `RENDER` estar definido | Variável do Render, não verificada daqui | Conferir o login no Render após o deploy |
 | Render instala `requirements.txt` (sem pins) | Comando de build é decisão de deploy | Trocar para `requirements.lock`, se quiser versões fixas |
 | Rate limit do login em memória por processo | Sem storage compartilhado | Só importa com mais de um worker; então usar Redis |

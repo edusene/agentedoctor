@@ -38,7 +38,7 @@ _PREFIXO_CIFRA = "enc1:"
 def _fernet():
     """Chave derivada da SECRET_KEY. Sem a chave ou sem a biblioteca, o token fica como antes (texto)."""
     chave = os.getenv("SECRET_KEY", "")
-    if not chave:
+    if chave in ("", "troque_esta_chave_secreta_aleatoria"):
         return None
     try:
         import base64
@@ -51,6 +51,8 @@ def _fernet():
 
 def _guardar_token(token: str) -> None:
     f = _fernet() if token else None
+    if token and not f:
+        print("[google] AVISO: SECRET_KEY invalida ou 'cryptography' ausente; token guardado sem cifra")
     database.set_setting("google_refresh_token",
                          _PREFIXO_CIFRA + f.encrypt(token.encode("utf-8")).decode() if f else token)
 
@@ -86,7 +88,7 @@ def configurado() -> bool:
 
 
 def conectado() -> bool:
-    return configurado() and bool(database.get_setting("google_refresh_token", ""))
+    return configurado() and bool(_ler_token())
 
 
 def status() -> dict:

@@ -32,6 +32,7 @@ for _s in (sys.stdout, sys.stderr):
 from flask import Flask, request, jsonify, Response, redirect, url_for, render_template, session
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import memory
 import llm
@@ -69,9 +70,16 @@ if SECRET_KEY in ("", "troque_esta_chave_secreta_aleatoria"):
     SECRET_KEY = _secrets.token_hex(32)
     print("[auth] AVISO: SECRET_KEY nao definida; usando chave aleatoria (sessoes caem a cada deploy)")
 DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
-# Com o segredo definido, pedido sem assinatura e recusado. "0" volta ao
-# comportamento antigo (aceita sem assinatura) sem precisar de deploy.
+# Pedido sem assinatura valida e recusado, e sem DATAFY_WEBHOOK_SECRET o webhook
+# recusa tudo. "0" desliga a exigencia (so para emergencia) sem precisar de deploy.
 WEBHOOK_EXIGE_ASSINATURA = os.getenv("WEBHOOK_EXIGE_ASSINATURA", "1") != "0"
+if WEBHOOK_EXIGE_ASSINATURA and not DATAFY_WEBHOOK_SECRET:
+    print("[webhook] ERRO: DATAFY_WEBHOOK_SECRET nao definido; o webhook vai recusar todo pedido")
+
+
+def _segredo_webhook() -> str:
+    # Lido na hora: o painel grava o segredo novo no os.environ sem reiniciar o app.
+    return os.getenv("DATAFY_WEBHOOK_SECRET", "")
 
 _DIR = Path(__file__).parent
 PROMPT_PATH = _DIR / "prompts" / "secretaria.md"
@@ -165,9 +173,10 @@ def _llm_dentro_do_limite(user: str) -> bool:
 _CACHE_MAX = 500
 
 
-def _cache_cheio() -> bool:
-    """Respostas abertas guardadas no banco tem teto: pergunta nova nao enche a tabela settings."""
-    linha = db.fetch_one("SELECT COUNT(*) AS n FROM settings WHERE key LIKE ?", ("resposta_aberta:%",))
+def _cache_cheio(chave: str) -> bool:
+    """Respostas abertas da versao atual tem teto: pergunta nova nao enche a tabela settings."""
+    prefixo = chave.rsplit(":", 1)[0] + ":%"
+    linha = db.fetch_one("SELECT COUNT(*) AS n FROM settings WHERE key LIKE ?", (prefixo,))
     return bool(linha) and int(list(linha.values())[0]) >= _CACHE_MAX
 
 
@@ -439,7 +448,9 @@ def transcribe_audio(b64_data: str, mime: str) -> str:
 
 
 _MIME_OK = ("image/jpeg", "image/png", "image/webp", "image/gif", "audio/ogg", "audio/mpeg", "audio/mp4",
-            "audio/aac", "audio/amr", "video/mp4", "video/3gpp", "application/pdf")
+            "audio/aac", "audio/amr", "video/mp4", "video/3gpp", "application/pdf", "text/plain",
+            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 def _mime_seguro(mime: str) -> str:
@@ -1027,7 +1038,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     history=[{"role": "user", "parts": [{"text": texto}]}], system=system)
                 _seg_ia = time.monotonic() - _t_ia
                 _, _violou = secretaria.montar(secretaria.Decisao(usar_llm=True), texto_modelo)
-                if texto_modelo and not _violou and not _cache_cheio():
+                if texto_modelo and not _violou and not _cache_cheio(chave_cache):
                     database.set_setting(chave_cache, texto_modelo)
             except Exception as e:
                 # Modelo fora do ar (429, rede): a duvida recebe a resposta
@@ -1406,17 +1417,12 @@ app.config["SESSION_COOKIE_SECURE"] = bool(os.getenv("RENDER"))  # Render define
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # uploads de PDF/DOCX do knowledge
 
-def _ip_do_cliente() -> str:
-    # Atras do proxy do Render todo mundo chegava com o mesmo endereco: o limite
-    # de 200/min era do painel INTEIRO, e estourar devolvia 429 em HTML - a
-    # Agenda falhava em silencio e so voltava no minuto seguinte.
-    # O primeiro item do X-Forwarded-For e o cliente quem escreve (forjavel); o
-    # ultimo e o que o proxy do Render acrescentou com o IP real.
-    encaminhado = request.headers.get("X-Forwarded-For", "")
-    return encaminhado.split(",")[-1].strip() if encaminhado else get_remote_address()
+# Atras do proxy do Render todo mundo chegava com o mesmo endereco (o limite era do
+# painel INTEIRO). ProxyFix(x_for=1) usa o IP que o proxy acrescentou e ignora o que o
+# cliente escreve no X-Forwarded-For (recomendado pela documentacao do Flask-Limiter).
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 
-
-limiter = Limiter(_ip_do_cliente, app=app, default_limits=["200 per minute"],
+limiter = Limiter(get_remote_address, app=app, default_limits=["200 per minute"],
                   default_limits_exempt_when=lambda: bool(session.get("logged_in")))
 
 buffer = MessageBuffer(wait_seconds=BUFFER_SECONDS, on_flush=handle_flush)
@@ -1484,6 +1490,7 @@ def webhook_verify():
 
 
 @app.post("/webhook")
+@limiter.exempt
 def webhook():
     # Validação Datafy
     signature = request.headers.get("x-datafy-signature-256", "")
@@ -1493,13 +1500,14 @@ def webhook():
 
     # Antes, pedido SEM assinatura pulava a checagem: qualquer um podia se
     # passar por paciente e fazer o bot mandar mensagem pelo numero do consultorio.
-    if WEBHOOK_EXIGE_ASSINATURA and not (DATAFY_WEBHOOK_SECRET and signature and timestamp):
+    segredo = _segredo_webhook()
+    if WEBHOOK_EXIGE_ASSINATURA and not (segredo and signature and timestamp):
         print("[webhook] Recusado: sem assinatura ou DATAFY_WEBHOOK_SECRET nao definido")
         return "Forbidden", 401
 
-    if DATAFY_WEBHOOK_SECRET and signature and timestamp:
+    if segredo and signature and timestamp:
         expected = "sha256=" + hmac.new(
-            DATAFY_WEBHOOK_SECRET.encode("utf-8"),
+            segredo.encode("utf-8"),
             f"{timestamp}.{raw_body}".encode("utf-8"),
             hashlib.sha256
         ).hexdigest()

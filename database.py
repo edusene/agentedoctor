@@ -4,6 +4,7 @@ Usa db.py como camada de abstração (suporta SQLite e PostgreSQL).
 O agente Gemini continua usando memory.py (in-memory) para seu histórico.
 """
 
+import clinica
 import db
 import json
 from datetime import datetime, timedelta
@@ -1331,7 +1332,7 @@ def get_recent_messages(phone: str, limit: int = 20) -> list[dict]:
     try:
         corte = get_reset_at(phone)
     except Exception as e:
-        print(f"[db] WARN nao leu reset_at de {phone}: {e}")
+        print(f"[db] WARN nao leu reset_at de {clinica.mascarar_fone(phone)}: {e}")
     if corte:
         rows = db.fetch_all(
             "SELECT direction, body FROM messages WHERE phone=? AND body <> '' "

@@ -836,7 +836,9 @@ _PROIBIDO: list[tuple[str, re.Pattern, str]] = [
     ("preco", _rx(
         r"r\$ ?\d", r"\d+ ?(mil )?reais", r"a partir de \d", r"(custa|fica|sai) (em torno|cerca|aproximadamente|por volta|uns|umas|mais ou menos)",
         r"em \d+ ?x\b", r"parcel\w* em \d",
-        r"\b(cem|duzentos|trezentos|quatrocentos|quinhentos|seiscentos|setecentos|oitocentos|novecentos|mil|\w+ mil) reais",
+        r"\b(cem|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|cento|duzentos|trezentos|"
+        r"quatrocentos|quinhentos|seiscentos|setecentos|oitocentos|novecentos|mil|\w+ mil)( e \w+)* reais",
+        r"\b\d+,\d{2}\b",
         r"\d+ ?(conto|contos|pila|pilas)\b", r"\b\d{3,} ?(rs|brl)\b",
     ), None),
     ("medicamento", _rx(

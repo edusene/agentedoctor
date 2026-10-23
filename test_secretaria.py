@@ -207,7 +207,8 @@ class ConferenciaDoModelo(unittest.TestCase):
 
     def test_preco_por_extenso_e_diagnostico_parafraseado(self):
         for modelo in ("A avaliação fica em quinhentos reais.", "Sai uns 300 pila.",
-                       "Isso pode ser um cisto, mas só na consulta.", "Seu caso seria uma infecção."):
+                       "Isso pode ser um cisto, mas só na consulta.", "Seu caso seria uma infecção.",
+                       "Fica cinquenta reais.", "São trezentos e cinquenta reais.", "O valor é 350,00."):
             with self.subTest(modelo=modelo):
                 self.assertTrue(clinica.conferir_resposta(modelo)[1])
 

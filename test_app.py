@@ -5,8 +5,12 @@ Importa o app, que carrega o .env no import: so roda pelo `python verify.py --te
 que liga a trava contra producao (SQLite temporario). Fora dele, pula.
 """
 
+import hashlib
+import hmac
 import os
+import time
 import unittest
+from unittest import mock
 
 if not os.environ.get("VERIFY_TESTES"):
     raise unittest.SkipTest("rode por: python verify.py --testes (trava contra producao)")
@@ -72,6 +76,21 @@ class TestWebhook(unittest.TestCase):
     def test_sem_assinatura_e_recusado(self):
         r = cliente().post("/webhook", data="{}", headers={"Content-Type": "application/json"})
         self.assertEqual(r.status_code, 401)
+
+    def _assinado(self, corpo, segredo):
+        ts = str(int(time.time()))
+        sig = "sha256=" + hmac.new(segredo.encode(), f"{ts}.{corpo}".encode(), hashlib.sha256).hexdigest()
+        return {"Content-Type": "application/json", "x-datafy-signature-256": sig, "x-datafy-timestamp": ts}
+
+    def test_pedido_assinado_corretamente_passa(self):
+        r = cliente().post("/webhook", data="{}", headers=self._assinado("{}", "segredo-de-teste"))
+        self.assertEqual(r.status_code, 200)
+
+    def test_segredo_trocado_no_painel_vale_sem_reiniciar(self):
+        with mock.patch.dict(os.environ, {"DATAFY_WEBHOOK_SECRET": "segredo-novo"}):
+            c = cliente()
+            self.assertEqual(c.post("/webhook", data="{}", headers=self._assinado("{}", "segredo-novo")).status_code, 200)
+            self.assertEqual(c.post("/webhook", data="{}", headers=self._assinado("{}", "segredo-de-teste")).status_code, 401)
 
     def test_assinatura_errada_e_recusada(self):
         r = cliente().post("/webhook", data="{}", headers={

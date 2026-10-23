@@ -9,6 +9,8 @@ import threading
 import time
 from typing import Callable
 
+import clinica
+
 
 class MessageBuffer:
     def __init__(self, wait_seconds: float, on_flush: Callable[[str, list[dict]], None]):
@@ -78,5 +80,5 @@ class MessageBuffer:
                     return
                 # Limpa estado antes de chamar o callback (evita race condition)
                 self._state[user] = {"items": [], "timer": None}
-            print(f"[buffer] flush user={user} msgs={len(items)}")
+            print(f"[buffer] flush user={clinica.mascarar_fone(user)} msgs={len(items)}")
             self._on_flush(user, items)

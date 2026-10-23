@@ -6,6 +6,7 @@ Suporta parts multimodais (text + inline_data para imagens).
 
 import threading
 import os
+import clinica
 import database
 
 # Janela de mensagens enviadas ao LLM. Os dados coletados do paciente ficam
@@ -65,6 +66,6 @@ def reset(user: str) -> None:
         import ficha_paciente
         ficha_paciente.reset(user)
     except Exception as e:
-        print(f"[memory] WARN nao limpou ficha de {user}: {e}")
+        print(f"[memory] WARN nao limpou ficha de {clinica.mascarar_fone(user)}: {e}")
 
 

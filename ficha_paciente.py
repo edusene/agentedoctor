@@ -133,7 +133,7 @@ def _com_novas_tentativas(acao, oque: str, phone: str):
             return acao()
         except Exception as e:
             if espera is None:
-                raise FichaIndisponivel(f"{oque} de {phone}: {e}") from e
+                raise FichaIndisponivel(f"{oque} de {clinica.mascarar_fone(phone)}: {e}") from e
             print(f"[ficha] WARN {oque} de {clinica.mascarar_fone(phone)} falhou ({str(e).strip()[:80]}); "
                   f"nova tentativa em {espera}s")
             time.sleep(espera)
