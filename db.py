@@ -31,6 +31,12 @@ _pg_init_done = False
 # agente - e quem perdia a corrida era o agente, que entao nao respondia.
 # Agora o pool e maior e quem chega com ele cheio ESPERA a vez.
 _PG_MAX = int(os.getenv("DB_POOL_MAX", "12"))
+# Conexoes que ficam abertas. Com 1 (ate 23/10), o psycopg2 FECHAVA toda
+# conexao devolvida alem da primeira: cada consulta simultanea (webhook,
+# status de entrega, espelho no painel, polling do painel) abria uma nova -
+# TLS + login no Supabase em outra regiao, ~1,5 s cada. Log de 23/10: 5
+# consultas em 7,9 s no resumo, contra 1,3 s quando nada corria junto.
+_PG_MIN = min(_PG_MAX, int(os.getenv("DB_POOL_MIN", "6")))
 _PG_ESPERA_SEG = 20
 _pg_vagas = threading.BoundedSemaphore(_PG_MAX)
 
@@ -39,6 +45,10 @@ _pg_vagas = threading.BoundedSemaphore(_PG_MAX)
 # esperando a rede. Keepalive mantem viva e detecta a morta; tcp_user_timeout
 # poe um teto; e a que ficou parada demais e trocada antes de usar.
 _PG_OCIOSA_SEG = 120
+# As abertas sao usadas de tempos em tempos (SELECT 1) para nao passarem de
+# _PG_OCIOSA_SEG paradas: trocada na hora do uso, a conexao custava o mesmo
+# 1,5 s que o pool pequeno custava.
+_PG_AQUECER_SEG = 45
 _PG_REDE = dict(connect_timeout=10, keepalives=1, keepalives_idle=20,
                 keepalives_interval=5, keepalives_count=3, tcp_user_timeout=10000)
 _pg_ultimo_uso: dict[int, float] = {}
@@ -55,12 +65,12 @@ def _init_pg_pool():
         print("[db] WARN: DATABASE_URL nao configurada")
         return
     try:
-        _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, _PG_MAX, url, **_PG_REDE)
+        _pg_pool = psycopg2.pool.ThreadedConnectionPool(_PG_MIN, _PG_MAX, url, **_PG_REDE)
     except psycopg2.ProgrammingError:
         # libpq antiga sem tcp_user_timeout: segue so com os keepalives
         rede = {k: v for k, v in _PG_REDE.items() if k != "tcp_user_timeout"}
         try:
-            _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, _PG_MAX, url, **rede)
+            _pg_pool = psycopg2.pool.ThreadedConnectionPool(_PG_MIN, _PG_MAX, url, **rede)
         except Exception as e:
             print(f"[db] ERRO pool PostgreSQL: {e}")
             _pg_pool = None
@@ -69,7 +79,53 @@ def _init_pg_pool():
         print(f"[db] ERRO pool PostgreSQL: {e}")
         _pg_pool = None
         return
-    print(f"[db] pool PostgreSQL conectado (ate {_PG_MAX} conexoes, com espera)")
+    print(f"[db] pool PostgreSQL conectado ({_PG_MIN} abertas, ate {_PG_MAX}, com espera)")
+    threading.Thread(target=_manter_aquecidas, name="db-aquecer", daemon=True).start()
+
+
+def _aquecer_uma_vez() -> int:
+    """Usa as conexoes paradas ha mais de _PG_AQUECER_SEG; a morta sai do pool.
+
+    So mexe nas que estao paradas no pool e so quando ha vaga livre: nunca
+    disputa conexao com o atendimento.
+    """
+    if _pg_pool is None:
+        return 0
+    paradas = []
+    agora = time.monotonic()
+    for _ in range(len(getattr(_pg_pool, "_pool", []))):
+        if not _pg_vagas.acquire(blocking=False):
+            break
+        try:
+            paradas.append(_pg_pool.getconn())
+        except Exception:
+            _pg_vagas.release()
+            break
+    usadas = 0
+    for conn in paradas:
+        try:
+            if conn.closed:
+                _put_pg_conn(conn, quebrada=True)
+                continue
+            if agora - _pg_ultimo_uso.get(id(conn), 0.0) >= _PG_AQUECER_SEG:
+                _autocommit(conn)
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                usadas += 1
+            _put_pg_conn(conn)
+        except Exception as e:
+            print(f"[db] conexao parada caiu ({str(e).strip()[:60]}); saiu do pool")
+            _put_pg_conn(conn, quebrada=True)
+    return usadas
+
+
+def _manter_aquecidas() -> None:
+    while True:
+        time.sleep(_PG_AQUECER_SEG)
+        try:
+            _aquecer_uma_vez()
+        except Exception as e:
+            print(f"[db] WARN aquecimento do pool: {e}")
 
 
 def _autocommit(conn):
