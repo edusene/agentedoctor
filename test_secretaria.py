@@ -476,17 +476,16 @@ class Fluxo(unittest.TestCase):
         self.assertEqual(ficha["area"], "exodontia")
 
     def test_preco_no_meio_do_funil(self):
-        # Sem queixa ainda: nao chuta valor, a equipe confirma.
+        # Sem queixa ainda: a tabela de valores por motivo, sem chutar.
         ficha, saidas = conversa(["Oi", "Ana", "Quanto custa?"])
         texto = saidas[2][2]
-        self.assertIn(clinica.RESPOSTA_VALOR_A_CONFIRMAR, texto)
+        self.assertIn(clinica.TABELA_VALORES, texto)
         # A queixa ja tinha sido perguntada: volta na versao curta.
         self.assertIn(fp.PERGUNTAS_CURTAS["queixa"], texto)
-        self.assertNotIn("R$", texto)
 
     def test_valor_pela_queixa(self):
         """R$ 400: ATM, apneia, ortognatica, esteticas. R$ 300: siso, enxerto,
-        lesoes, biopsias. O resto, a equipe confirma (decisao de 23/10)."""
+        lesoes, biopsias. O resto recebe a tabela por motivo (23/10)."""
         for queixa, valor in [("Tenho dor na ATM", 400), ("Tenho apneia do sono", 400),
                               ("Minha mordida não encaixa", 400), ("Tenho papada", 400),
                               ("Preciso tirar o siso", 300), ("Tenho um cisto na mandíbula", 300),
@@ -495,18 +494,19 @@ class Fluxo(unittest.TestCase):
                 ficha, saidas = conversa(["Oi", "Ana", queixa, "quanto custa a consulta?"])
                 texto = saidas[3][2]
                 if valor:
-                    self.assertIn(clinica.cartao_valor(valor), texto)
-                    self.assertTrue(ficha["valor_informado"])
+                    self.assertIn(f"o valor da consulta é R$ {valor}.", texto)
+                    # O cartao fica para o fim do atendimento.
+                    self.assertNotIn(clinica.cartao_valor(valor), texto)
+                    self.assertNotIn(clinica.TABELA_VALORES, texto)
                 else:
-                    self.assertIn(clinica.RESPOSTA_VALOR_A_CONFIRMAR, texto)
-                    self.assertNotIn("R$", texto)
+                    self.assertIn(clinica.TABELA_VALORES, texto)
 
-    def test_valor_ja_dito_nao_se_repete_no_encaminhamento(self):
+    def test_cartao_do_valor_fecha_o_atendimento_mesmo_ja_perguntado(self):
         conversa_ = self.CONVERSA[:3] + ["qual o valor?"] + self.CONVERSA[3:]
         _, saidas = conversa(conversa_)
-        self.assertIn(clinica.cartao_valor(300), saidas[3][2])
+        self.assertIn("o valor da consulta é R$ 300.", saidas[3][2])
         self.assertIn(clinica.RESPOSTA_ENCAMINHADO, saidas[-1][2])
-        self.assertNotIn("R$", saidas[-1][2])
+        self.assertIn(clinica.cartao_valor(300), saidas[-1][2])
 
     def test_sem_valor_definido_o_encaminhamento_avisa_que_a_equipe_confirma(self):
         _, saidas = conversa(["Oi", "Ana", "dor no dente", CADASTRO_OK, "terças à tarde",

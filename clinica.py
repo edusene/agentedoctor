@@ -211,9 +211,32 @@ def cartao_valor(valor: int) -> str:
             "Formas de pagamento: Dinheiro, Pix, Débito, Crédito em até 2x sem juros.")
 
 
+TABELA_VALORES = (
+    "O valor da consulta depende do motivo:\n"
+    "•  R$ 400: ATM (articulação da mandíbula), apneia/ronco, cirurgia ortognática e "
+    "procedimentos estéticos da face (queixo, papada, lifting)\n"
+    "•  R$ 300: extração de dentes e siso, enxerto ósseo, cistos/lesões e biópsias\n"
+    "Para outros motivos, a equipe confirma o valor junto com o dia e horário da avaliação."
+)
+
+
 def resposta_valor(area: str, queixa: str = "") -> str:
+    """Cartao do fim do atendimento: confirma o valor com o paciente."""
     valor = valor_da_consulta(area, queixa)
     return cartao_valor(valor) if valor else RESPOSTA_VALOR_A_CONFIRMAR
+
+
+def resposta_pergunta_valor(area: str, queixa: str = "") -> str:
+    """Paciente pergunta o valor no meio da conversa (pedido de 23/10).
+
+    Motivo com valor: o valor dele, numa linha; o cartao vem no fim.
+    Sem motivo, ou motivo sem valor definido: a tabela por motivo.
+    """
+    valor = valor_da_consulta(area, queixa)
+    if valor:
+        return (f"Para o seu caso, o valor da consulta é R$ {valor}. No final do "
+                "atendimento eu confirmo com você o valor e as formas de pagamento.")
+    return TABELA_VALORES
 
 
 _DIAS_SEMANA_CAP = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira",

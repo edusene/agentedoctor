@@ -58,10 +58,8 @@ def apresentacao(momento: datetime, nome: str = "") -> str:
 
 
 def _valor_para(ficha: dict) -> str:
-    """Valor da consulta pela area da queixa (roteiro do doutor)."""
-    if clinica.valor_da_consulta(ficha.get("area", ""), ficha.get("queixa", "")):
-        ficha["valor_informado"] = True
-    return clinica.resposta_valor(ficha.get("area", ""), ficha.get("queixa", ""))
+    """Resposta a "quanto custa?": valor pelo motivo ou a tabela por motivo."""
+    return clinica.resposta_pergunta_valor(ficha.get("area", ""), ficha.get("queixa", ""))
 
 
 _SO_CUMPRIMENTO = re.compile(
@@ -238,11 +236,11 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
             ficha["ultima_pergunta"] = ""
             d.tipos.append("encaminhado")
             d.partes.append(clinica.RESPOSTA_ENCAMINHADO)
-            # Roteiro do doutor: se o paciente ainda nao perguntou, o valor
-            # vem agora.
-            if not ficha.get("valor_informado"):
-                d.tipos.append("valor")
-                d.partes.append(_valor_para(ficha))
+            # Roteiro do doutor: o cartao do valor fecha o atendimento sempre,
+            # mesmo que o paciente ja tenha perguntado - e a confirmacao.
+            d.tipos.append("valor")
+            d.partes.append(clinica.resposta_valor(ficha.get("area", ""),
+                                                   ficha.get("queixa", "")))
             orientacoes = clinica.orientacoes_pre_consulta(ficha)
             if orientacoes:
                 d.partes.append(orientacoes)
