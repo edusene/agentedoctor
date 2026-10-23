@@ -50,7 +50,25 @@ class TestPainel(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
 
 
+class TestSessaoEMidia(unittest.TestCase):
+    def test_logout_so_por_post(self):
+        c = cliente()
+        c.post("/login", data={"username": "admin", "password": "senha-de-teste-123"})
+        self.assertEqual(c.get("/logout").status_code, 405)
+        self.assertEqual(c.post("/logout").status_code, 302)
+        self.assertEqual(c.get("/panel").status_code, 302)
+
+    def test_mime_do_provedor_so_passa_se_for_midia_conhecida(self):
+        self.assertEqual(app_mod._mime_seguro("image/jpeg; charset=x"), "image/jpeg")
+        self.assertEqual(app_mod._mime_seguro('text/html"><script>'), "application/octet-stream")
+        self.assertEqual(app_mod._mime_seguro(None), "application/octet-stream")
+
+
 class TestWebhook(unittest.TestCase):
+    def test_corpo_grande_e_recusado(self):
+        r = cliente().post("/webhook", data="x" * (1024 * 1024 + 1), headers={"Content-Type": "application/json"})
+        self.assertEqual(r.status_code, 413)
+
     def test_sem_assinatura_e_recusado(self):
         r = cliente().post("/webhook", data="{}", headers={"Content-Type": "application/json"})
         self.assertEqual(r.status_code, 401)
@@ -75,6 +93,24 @@ class TestLimites(unittest.TestCase):
         app_mod._llm_chamadas.clear()
         resultados = [app_mod._llm_dentro_do_limite("5562000000000") for _ in range(app_mod._LLM_POR_HORA + 1)]
         self.assertEqual(resultados, [True] * app_mod._LLM_POR_HORA + [False])
+
+
+
+class TestTokenGoogle(unittest.TestCase):
+    def test_refresh_token_fica_cifrado_no_banco_e_volta_igual(self):
+        import database
+        import google_agenda
+        google_agenda._guardar_token("1//token-de-teste")
+        guardado = database.get_setting("google_refresh_token", "")
+        self.assertTrue(guardado.startswith("enc1:"))
+        self.assertNotIn("token-de-teste", guardado)
+        self.assertEqual(google_agenda._ler_token(), "1//token-de-teste")
+
+    def test_token_antigo_em_texto_ainda_e_lido(self):
+        import database
+        import google_agenda
+        database.set_setting("google_refresh_token", "1//antigo")
+        self.assertEqual(google_agenda._ler_token(), "1//antigo")
 
 
 if __name__ == "__main__":

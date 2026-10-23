@@ -817,6 +817,8 @@ _PROIBIDO: list[tuple[str, re.Pattern, str]] = [
         r"com certeza (e|voce tem|se trata)", r"voce (tem|esta com) (um |uma )?(cisto|tumor|fratura|infeccao|lesao|cancer|abscesso)",
         r"nao precisa se preocupar", r"(e|seria) so (um |uma )?\w+ (simples|normal|comum)", r"isso e normal",
         r"(isso|o seu caso|seu caso) (se trata|e) de (um |uma )",
+        r"(isso|isto|seu caso) (e|seria|pode ser|deve ser) (um |uma )?(cisto|abscesso|fratura|infeccao|tumor|cancer|lesao maligna)",
+        r"pode ser (um |uma )?(cisto|tumor|cancer|infeccao|abscesso|fratura)\b",
     ), RESPOSTA_DIAGNOSTICO),
     ("indicacao", _rx(
         r"voce (precisa|vai precisar|tera que|tem que|deve|necessita) (fazer |de |realizar |passar por )?(uma |um |o |a )?"
@@ -834,6 +836,8 @@ _PROIBIDO: list[tuple[str, re.Pattern, str]] = [
     ("preco", _rx(
         r"r\$ ?\d", r"\d+ ?(mil )?reais", r"a partir de \d", r"(custa|fica|sai) (em torno|cerca|aproximadamente|por volta|uns|umas|mais ou menos)",
         r"em \d+ ?x\b", r"parcel\w* em \d",
+        r"\b(cem|duzentos|trezentos|quatrocentos|quinhentos|seiscentos|setecentos|oitocentos|novecentos|mil|\w+ mil) reais",
+        r"\d+ ?(conto|contos|pila|pilas)\b", r"\b\d{3,} ?(rs|brl)\b",
     ), None),
     ("medicamento", _rx(
         r"\btome\b", r"\btomar (um|uma|\d)", r"\d+ ?mg\b", r"de \d+ em \d+ ?h", r"a cada \d+ ?h",

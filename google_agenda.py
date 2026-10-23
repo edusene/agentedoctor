@@ -32,6 +32,41 @@ import requests
 
 import database
 
+_PREFIXO_CIFRA = "enc1:"
+
+
+def _fernet():
+    """Chave derivada da SECRET_KEY. Sem a chave ou sem a biblioteca, o token fica como antes (texto)."""
+    chave = os.getenv("SECRET_KEY", "")
+    if not chave:
+        return None
+    try:
+        import base64
+        import hashlib
+        from cryptography.fernet import Fernet
+        return Fernet(base64.urlsafe_b64encode(hashlib.sha256(chave.encode("utf-8")).digest()))
+    except ImportError:
+        return None
+
+
+def _guardar_token(token: str) -> None:
+    f = _fernet() if token else None
+    database.set_setting("google_refresh_token",
+                         _PREFIXO_CIFRA + f.encrypt(token.encode("utf-8")).decode() if f else token)
+
+
+def _ler_token() -> str:
+    valor = database.get_setting("google_refresh_token", "")
+    if not valor.startswith(_PREFIXO_CIFRA):
+        if valor and _fernet():
+            _guardar_token(valor)  # token antigo em texto: cifra na primeira leitura
+        return valor
+    f = _fernet()
+    try:
+        return f.decrypt(valor[len(_PREFIXO_CIFRA):].encode("utf-8")).decode("utf-8") if f else ""
+    except Exception:
+        return ""  # SECRET_KEY trocada: reconectar o Google
+
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _REVOKE_URL = "https://oauth2.googleapis.com/revoke"
@@ -95,7 +130,7 @@ def trocar_codigo(code: str, redirect: str) -> None:
     if r.status_code != 200 or not dados.get("access_token"):
         raise RuntimeError(f"Google recusou a conexão: {dados.get('error_description') or dados.get('error') or r.status_code}")
     if dados.get("refresh_token"):
-        database.set_setting("google_refresh_token", dados["refresh_token"])
+        _guardar_token(dados["refresh_token"])
     _token_cache.update(access_token=dados["access_token"],
                         expira_em=time.time() + int(dados.get("expires_in", 3600)) - 60)
     try:
@@ -108,7 +143,7 @@ def trocar_codigo(code: str, redirect: str) -> None:
 
 def desconectar() -> None:
     parar_avisos()
-    token = database.get_setting("google_refresh_token", "")
+    token = _ler_token()
     if token:
         try:
             requests.post(_REVOKE_URL, params={"token": token}, timeout=10)
@@ -122,7 +157,7 @@ def desconectar() -> None:
 def _access_token() -> str:
     if _token_cache["access_token"] and time.time() < _token_cache["expira_em"]:
         return _token_cache["access_token"]
-    refresh = database.get_setting("google_refresh_token", "")
+    refresh = _ler_token()
     if not refresh:
         raise RuntimeError("Google Calendar não conectado")
     r = requests.post(_TOKEN_URL, data={

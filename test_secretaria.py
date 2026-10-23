@@ -205,6 +205,12 @@ class ConferenciaDoModelo(unittest.TestCase):
                 self.assertTrue(violacoes)
                 self.assertEqual(final, esperado)
 
+    def test_preco_por_extenso_e_diagnostico_parafraseado(self):
+        for modelo in ("A avaliação fica em quinhentos reais.", "Sai uns 300 pila.",
+                       "Isso pode ser um cisto, mas só na consulta.", "Seu caso seria uma infecção."):
+            with self.subTest(modelo=modelo):
+                self.assertTrue(clinica.conferir_resposta(modelo)[1])
+
     def test_resposta_limpa_passa(self):
         ok = ("O enxerto ósseo reconstrói ou aumenta a quantidade de osso em uma região. "
               "O planejamento depende da avaliação do Dr. Fabrício.")

@@ -162,6 +162,15 @@ def _llm_dentro_do_limite(user: str) -> bool:
     return True
 
 
+_CACHE_MAX = 500
+
+
+def _cache_cheio() -> bool:
+    """Respostas abertas guardadas no banco tem teto: pergunta nova nao enche a tabela settings."""
+    linha = db.fetch_one("SELECT COUNT(*) AS n FROM settings WHERE key LIKE ?", ("resposta_aberta:%",))
+    return bool(linha) and int(list(linha.values())[0]) >= _CACHE_MAX
+
+
 def _chave_resposta_aberta(texto: str) -> str:
     """Chave da resposta travada de uma duvida aberta.
 
@@ -429,6 +438,16 @@ def transcribe_audio(b64_data: str, mime: str) -> str:
         return ""
 
 
+_MIME_OK = ("image/jpeg", "image/png", "image/webp", "image/gif", "audio/ogg", "audio/mpeg", "audio/mp4",
+            "audio/aac", "audio/amr", "video/mp4", "video/3gpp", "application/pdf")
+
+
+def _mime_seguro(mime: str) -> str:
+    """Tipo vindo do provedor entra num data: URI; so os de midia conhecidos passam."""
+    base = str(mime or "").split(";")[0].strip().lower()
+    return base if base in _MIME_OK else "application/octet-stream"
+
+
 def _build_user_parts(items: list[dict]) -> list[dict]:
     parts = []
     seen_media = set()
@@ -456,7 +475,7 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                                 if resp.status_code == 200:
                                     import base64 as _b64
                                     b64_data = _b64.b64encode(resp.content).decode()
-                                    media_url = f"data:{mime_from_api};base64,{b64_data}"
+                                    media_url = f"data:{_mime_seguro(mime_from_api)};base64,{b64_data}"
                                     database.update_message_media(msg["id"], media_url)
                                     print(f"[flush] on-demand download ok msg={msg['id']} mime={mime_from_api}")
                     except Exception as e:
@@ -1008,7 +1027,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
                     history=[{"role": "user", "parts": [{"text": texto}]}], system=system)
                 _seg_ia = time.monotonic() - _t_ia
                 _, _violou = secretaria.montar(secretaria.Decisao(usar_llm=True), texto_modelo)
-                if texto_modelo and not _violou:
+                if texto_modelo and not _violou and not _cache_cheio():
                     database.set_setting(chave_cache, texto_modelo)
             except Exception as e:
                 # Modelo fora do ar (429, rede): a duvida recebe a resposta
@@ -1266,7 +1285,7 @@ def _download_media_async(message_db_id: int, wa_media_id: str) -> None:
                 return
             import base64
             b64 = base64.b64encode(data).decode()
-            data_uri = f"data:{mime};base64,{b64}"
+            data_uri = f"data:{_mime_seguro(mime)};base64,{b64}"
             database.update_message_media(message_db_id, data_uri)
             print(f"[media] msg={message_db_id} guardado len={len(data_uri)}")
     except Exception as e:
@@ -1298,7 +1317,7 @@ def _fetch_and_store_media(m: dict) -> str:
             return ""
         import base64
         b64 = base64.b64encode(data).decode()
-        data_uri = f"data:{mime};base64,{b64}"
+        data_uri = f"data:{_mime_seguro(mime)};base64,{b64}"
         database.update_message_media(msg_id, data_uri)
         return data_uri
 
@@ -1438,7 +1457,7 @@ def login_action():
     return render_template("login.html", error="Credenciais invalidas")
 
 
-@app.get("/logout")
+@app.post("/logout")
 def logout_action():
     do_logout()
     return redirect(url_for("login_page"))
@@ -1469,6 +1488,7 @@ def webhook():
     # Validação Datafy
     signature = request.headers.get("x-datafy-signature-256", "")
     timestamp = request.headers.get("x-datafy-timestamp", "")
+    request.max_content_length = 1024 * 1024  # webhook so recebe JSON pequeno; midia vem por URL
     raw_body = request.get_data(as_text=True)
 
     # Antes, pedido SEM assinatura pulava a checagem: qualquer um podia se

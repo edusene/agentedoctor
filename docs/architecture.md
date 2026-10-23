@@ -2,7 +2,7 @@
 
 ## Stack real
 
-Python 3 (verificado em 3.14.7) com Flask 3.1, Flask-Limiter 4.1, psycopg2-binary 2.9 (pool), pgvector, openai 3.x, APScheduler, pypdf e python-docx. Versões mínimas em `requirements.txt` (`requirements.lock` como referência; ver `docs/setup.md`). Banco: Supabase PostgreSQL com pgvector (projeto `agentedoctor`, São Paulo). SQLite só para desenvolvimento offline e rollback. Hospedagem: Render, com deploy automático a cada push na `main`. WhatsApp: Datafy (API compatível com a Meta Cloud API).
+Python 3 (verificado em 3.14.7) com Flask 3.1, Flask-Limiter 4.1, psycopg2-binary 2.9 (pool), pgvector, openai 3.x, APScheduler, pypdf, python-docx e cryptography (cifra do token do Google). Versões mínimas em `requirements.txt` (`requirements.lock` como referência; ver `docs/setup.md`). Banco: Supabase PostgreSQL com pgvector (projeto `agentedoctor`, São Paulo). SQLite só para desenvolvimento offline e rollback. Hospedagem: Render, com deploy automático a cada push na `main`. WhatsApp: Datafy (API compatível com a Meta Cloud API).
 
 ## Mapa do código
 

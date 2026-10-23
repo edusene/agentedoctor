@@ -48,7 +48,7 @@ PRODUCT.md, README.md (links adicionados), AGENTS.md, CLAUDE.md, docs/architectu
 
 | Item | Antes | Depois |
 |---|---|---|
-| Testes | 106 OK (`test_secretaria`, `test_horarios`) | 116 OK (+2 detector de segredos, +8 rotas/webhook/limites em `test_app.py`) |
+| Testes | 106 OK (`test_secretaria`, `test_horarios`) | 122 OK (+2 detector de segredos, +13 em `test_app.py`, +1 guarda de saída) |
 | pyflakes | 8 avisos | 0 |
 | Segredos nos versionados | não verificado | 0 (detector em `verify.py`, com teste) |
 | `pip-audit -r requirements.txt` | não verificado | nenhuma vulnerabilidade conhecida (venv temporário) |
@@ -73,23 +73,22 @@ Nada crítico; sem segredo ativo no histórico. Corrigido nesta entrega (testes 
 - **F2** webhook agora **recusa** pedido sem assinatura ou sem `DATAFY_WEBHOOK_SECRET` (a menos que `WEBHOOK_EXIGE_ASSINATURA=0`). **Antes do deploy, confirme que `DATAFY_WEBHOOK_SECRET` existe no Render**; sem ele o bot deixa de receber mensagens.
 - **F3** logs: telefone mascarado (`5562...99`), texto do paciente e da transcrição fora dos logs, nome de perfil fora. As linhas `[tempo]` seguem completas.
 - **F4** editor de `.env` rejeita quebra de linha. **F5** sessão de 12 h e cookie `Secure` quando `RENDER` está definido (o Render define). **F6** toast/iniciais escapados e HSTS. **F7 parcial** `MAX_CONTENT_LENGTH` 25 MB.
-- **F8 parcial** teto de 12 chamadas ao modelo por número por hora (acima disso vale a resposta travada genérica; contador em memória, zera no reinício).
-- **F9 parcial** token do canal Google comparado em tempo constante. `requirements.lock` criado (referência; auditado sem vulnerabilidades).
+- **F8** teto de 12 chamadas ao modelo por número por hora (contador em memória, zera no reinício); no máximo 500 respostas abertas em cache; guarda de saída ampliada com preço por extenso/gíria e diagnóstico parafraseado ("pode ser um cisto").
+- **F9** token do canal Google em tempo constante; **refresh token do Google cifrado no banco** (Fernet, chave derivada da `SECRET_KEY`; token antigo em texto é cifrado na primeira leitura; se a `SECRET_KEY` mudar, reconectar o Google); tipos MIME do provedor só entram em `data:` se forem mídia conhecida. Nova dependência: `cryptography`.
+- **F5/F7 completos** logout só por POST (botão "Sair" virou formulário); corpo do `/webhook` limitado a 1 MB (413).
+- **Acessibilidade do painel (revisão estática)**: 12 botões só com ícone ganharam `aria-label`; foco visível (`:focus-visible`) global. Contraste, ordem de foco e leitor de tela **não** foram testados em navegador.
+- `requirements.lock` regenerado com `cryptography`.
 
 ## Pendências e próxima entrega
 
 | Item | Causa | Próxima ação |
 |---|---|---|
-| F2: confirmar `DATAFY_WEBHOOK_SECRET` no Render | Não há acesso ao painel do Render daqui | Conferir após o deploy: uma mensagem de teste deve chegar; se vier `Recusado` no log, definir a variável |
-| F5 resto: logout por GET | Troca exige mudar painel e template | Logout POST com o JS do painel |
-| F7 resto: corpo do webhook lido inteiro antes da assinatura | Teto global de 25 MB, sem teto menor no `/webhook` | `request.content_length` > 1 MB → 413 no `/webhook` |
-| F8 resto: guarda de saída é lista de regex; cache `resposta_aberta:*` sem validade | Design atual | Mais padrões de preço; validade do cache |
-| F9 resto: refresh token do Google em texto no banco; MIME do provedor em `data:` | Dívida | Avaliar criptografia do token; lista de MIME |
-| Render instala `requirements.txt` (sem pins) | Mudar o comando de build é decisão de deploy | Trocar para `requirements.lock` no Render, se quiser versões fixas |
-| Rate limit em memória por processo | Sem storage | Storage compartilhado se houver mais de um worker |
-| Arquivos acima de 350 linhas (`app.py` ~3,6 mil) | Herdado | Dividir por Blueprints junto de mudanças que os toquem |
-| Sem revisão de acessibilidade do painel | Não feita | Revisar com a extensão Chrome |
-| `gh`, differential-review, Sentry | Instalação global ou conta | Decidir; guias 19, 20 e 22 do toolkit |
-| CI nunca executado | Workflow criado | Conferir a primeira execução no GitHub após o push |
-
-Próxima entrega útil: logout POST e teto do `/webhook`.
+| F2: confirmar `DATAFY_WEBHOOK_SECRET` no Render | Sem acesso ao painel do Render daqui | Após o deploy, uma mensagem de teste deve chegar; se o log mostrar `Recusado`, definir a variável |
+| Cookie `Secure` depende de `RENDER` estar definido | Variável do Render, não verificada daqui | Conferir o login no Render após o deploy |
+| Render instala `requirements.txt` (sem pins) | Comando de build é decisão de deploy | Trocar para `requirements.lock`, se quiser versões fixas |
+| Rate limit do login em memória por processo | Sem storage compartilhado | Só importa com mais de um worker; então usar Redis |
+| `app.py` ~3,6 mil linhas e outros arquivos acima de 350 | Dividir 113 rotas sem testes de rota suficientes é risco alto | Dividir por Blueprints, uma área por vez, junto de testes em `test_app.py` |
+| Guarda de saída continua sendo lista de regex | Limite da abordagem | Ampliar a lista quando aparecer caso real; `[trava] ... BARRADA` no log mostra os casos |
+| Acessibilidade: teste real em navegador | Não executado | Rodar o painel local (SQLite) com a extensão Chrome e checar teclado/contraste |
+| `gh`, differential-review, Sentry | Instalação global ou conta Sentry | Decidir; guias 19, 20 e 22 do toolkit |
+| CI nunca executado | Workflow criado | Conferir a primeira execução no GitHub |

@@ -4640,3 +4640,6 @@ select option {
 @media (max-width: 600px) {
     .google-pop { right: auto; left: 0; }
 }
+
+/* Acessibilidade: foco visivel para navegacao por teclado */
+:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
