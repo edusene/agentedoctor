@@ -187,6 +187,9 @@ def _campo_aplicavel(ficha: dict, campo: str) -> bool:
     if campo == "detalhe_area":
         # Seção 13: pronto para agendar = reduzir explicação.
         return bool(ficha.get("area")) and ficha.get("intencao") != "pronto_agendar"
+    if campo == "cep":
+        # Sem endereco, nao ha CEP para pedir.
+        return ficha.get("endereco") != NAO_INFORMADO
     return True
 
 
@@ -214,7 +217,7 @@ _ITENS_CADASTRO = {
 
 def _pergunta_cadastro(ficha: dict) -> str:
     """Pede o cadastro de uma vez; depois, so o que ficou faltando."""
-    faltam = [c for c in CADASTRO if not ficha.get(c)]
+    faltam = [c for c in CADASTRO if not ficha.get(c) and _campo_aplicavel(ficha, c)]
     # "Endereço com CEP" ja pede o CEP: o item CEP so aparece sozinho.
     itens = [c for c in faltam if not (c == "cep" and "endereco" in faltam)]
     lista = "\n".join(f"• {_ITENS_CADASTRO[c]}" for c in itens)
@@ -252,13 +255,20 @@ def proximo_campo(ficha: dict) -> str:
         if ficha.get("tentativas", {}).get(campo, 0) >= MAX_TENTATIVAS:
             ficha[campo] = NAO_INFORMADO
             continue
+        # O endereco pode ter virado "Não informado" agora: o CEP cai junto.
+        if not _campo_aplicavel(ficha, campo):
+            continue
         return campo
     return ""
 
 
-def marcar_pergunta(ficha: dict, campo: str) -> None:
+def cadastro_completo(ficha: dict) -> bool:
+    return all(ficha.get(c) or not _campo_aplicavel(ficha, c) for c in CADASTRO)
+
+
+def marcar_pergunta(ficha: dict, campo: str, contar: bool = True) -> None:
     ficha["ultima_pergunta"] = campo
-    if campo in ORDEM:
+    if campo in ORDEM and contar:
         t = dict(ficha.get("tentativas") or {})
         t[campo] = t.get(campo, 0) + 1
         ficha["tentativas"] = t
@@ -595,7 +605,9 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         # Recusa vale para qualquer campo; "nao tenho" so para documento (RG,
         # CPF) - para o nome completo ele nao quer dizer nada.
         recusa = re.search(r"\b(?:prefiro nao|nao quero (?:informar|passar|dizer))\b", t)
-        sem_documento = campo in ("rg", "cpf", "email", "cep") and re.search(r"\bnao tenho\b", t)
+        # "Não" seco a "Qual é o seu RG?" (teste de 22/10) tambem e "nao tenho".
+        sem_documento = campo in ("rg", "cpf", "email", "cep") and (
+            re.search(r"\bnao tenho\b", t) or (clinica.e_nao(bruto) and len(t.split()) <= 2))
         if recusa or sem_documento:
             ficha[campo] = NAO_INFORMADO
             return True
@@ -737,7 +749,20 @@ def limpar_queixa(texto: str) -> str:
     """
     partes = [p.strip() for p in re.split(r"[\n]+|(?<=[.!?])\s+", texto or "") if p.strip()]
     uteis = [p for p in partes if not _RX_FRASE_DE_NOME.match(p) and not _RX_FRASE_CUMPRIMENTO.match(p)]
-    return " ".join(uteis or partes).strip()
+    limpa = " ".join(uteis or partes).strip()
+    # "Sou a Ana, preciso tirar o siso" / "Meu nome é Ana e tenho dor": o nome
+    # vem na mesma frase da queixa (teste de 22/10).
+    m = _RX_NOME_NO_COMECO.match(limpa)
+    if m and len(limpa[m.end():].split()) >= 2:
+        resto = limpa[m.end():].strip()
+        limpa = resto[0].upper() + resto[1:]
+    return limpa
+
+
+_RX_NOME_NO_COMECO = re.compile(
+    r"(?i)^\s*(?:(?:oi|ola|olá|bom dia|boa tarde|boa noite)[\s,!.]*)?"
+    r"(?:meu nome [ée]|me chamo|aqui [ée] (?:o|a)|sou (?:o|a))\s+"
+    rf"[{_LETRAS}]+(?:\s+(?!e\s)[{_LETRAS}]+){{0,3}}\s*(?:[,.;!\-–]+\s*|\s+e\s+)")
 
 
 # ── Cadastro (nome completo, nascimento, CPF, RG, endereco) ──────────────────
@@ -963,6 +988,7 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
 # Dentro do endereco, oito digitos soltos so podem ser o CEP ("Rua Angico,
 # 3170 - Eletronorte 76808526", teste de 22/10).
 _RX_CEP_NO_ENDERECO = re.compile(r"(?<![\d.\-])(\d{8})(?![\d\-])")
+_RX_NUMERO_LONGO = re.compile(r"(?<![\d.\-])(\d{6,12})(?![\d\-])")
 
 
 def _separar_cep_do_endereco(achados: dict) -> None:
@@ -973,7 +999,16 @@ def _separar_cep_do_endereco(achados: dict) -> None:
         if cep:
             achados.setdefault("cep", cep)
             endereco = endereco.replace(m.group(0), " ")
-    achados["endereco"] = " ".join(endereco.split()).strip(" ,;.-")
+    # "Rua Angico, 3170 - Eletronorte 76808526 e 1234567 e ana@email.com"
+    # (teste de 22/10): numero com 6+ digitos nao e o numero da casa - e o RG
+    # que veio na mesma linha.
+    for m in list(_RX_NUMERO_LONGO.finditer(endereco)):
+        if "rg" not in achados:
+            achados["rg"] = m.group(1)
+        endereco = endereco.replace(m.group(0), " ")
+    endereco = re.sub(r"(?:\s+e)+\s*$", "", " ".join(endereco.split()))
+    endereco = re.sub(r"\s+e(?:\s+e)+\s+", " e ", endereco)
+    achados["endereco"] = endereco.strip(" ,;.-")
 
 
 def _rg_que_era_o_cep(ficha: dict) -> None:

@@ -181,6 +181,27 @@ def _to_dicts(rows) -> list[dict]:
     return [_to_dict(r) for r in rows]
 
 
+# ── Medicao (linha [tempo] do atendimento) ───────────────────────────────────
+# Quanto do atendimento foi espera do banco: cada thread soma o proprio tempo.
+
+_medicao = threading.local()
+
+
+def iniciar_medicao() -> None:
+    _medicao.seg = 0.0
+    _medicao.idas = 0
+
+
+def medicao() -> tuple[float, int]:
+    return getattr(_medicao, "seg", 0.0), getattr(_medicao, "idas", 0)
+
+
+def _medir(inicio: float) -> None:
+    if hasattr(_medicao, "seg"):
+        _medicao.seg += time.monotonic() - inicio
+        _medicao.idas += 1
+
+
 # ── Query helpers ────────────────────────────────────────────────────────────
 
 def _adapt_query(query: str) -> str:
@@ -213,6 +234,14 @@ def _falhou(conn, e: Exception) -> None:
 
 def execute(query: str, params: tuple | list | None = None, *, commit: bool = True) -> Any:
     """Executa uma query e opcionalmente faz commit. Retorna o cursor."""
+    inicio = time.monotonic()
+    try:
+        return _execute(query, params, commit=commit)
+    finally:
+        _medir(inicio)
+
+
+def _execute(query: str, params, *, commit: bool) -> Any:
     conn = _get_conn()
     cur = _cursor(conn)
     adapted = _adapt_query(query)
@@ -251,6 +280,7 @@ def _ler(query: str, params, uma: bool):
 
 def _ler_com_nova_tentativa(query: str, params, uma: bool):
     """Leitura nao altera nada: se a conexao estava morta, tenta numa nova."""
+    inicio = time.monotonic()
     try:
         return _ler(query, params, uma)
     except Exception as e:
@@ -258,6 +288,8 @@ def _ler_com_nova_tentativa(query: str, params, uma: bool):
             raise
         print(f"[db] conexao caiu ({str(e).strip()[:80]}); repetindo a leitura")
         return _ler(query, params, uma)
+    finally:
+        _medir(inicio)
 
 
 def fetch_one(query: str, params: tuple | list | None = None) -> dict | None:
@@ -301,6 +333,14 @@ def executescript(sql: str) -> None:
 
 def execute_returning(query: str, params: tuple | list | None = None) -> int | None:
     """Executa um INSERT ... RETURNING id no PostgreSQL e retorna o ID."""
+    inicio = time.monotonic()
+    try:
+        return _execute_returning(query, params)
+    finally:
+        _medir(inicio)
+
+
+def _execute_returning(query: str, params) -> int | None:
     conn = _get_conn()
     cur = _cursor(conn)
     try:

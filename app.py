@@ -183,8 +183,6 @@ TRANSFER_KEYWORDS = [
     "atendente humano",
     "falar com alguem",
     "falar com alguém",
-    "reclamacao",
-    "reclamação",
     "remarcar",
     "desmarcar",
     "cancelar a consulta",
@@ -205,7 +203,23 @@ def _check_transfer_keywords(items: list[dict]) -> str | None:
     for kw in TRANSFER_KEYWORDS:
         if kw in full_text:
             return kw
-    return None
+    # "Quero falar com UM atendente" nao batia com "falar com atendente"
+    # (teste de 22/10): o pedido e lido com artigo, sem acento e sem ordem fixa.
+    m = _RX_PEDIDO_DE_PESSOA.search(clinica.normalizar(full_text))
+    return m.group(0) if m else None
+
+
+# "Reclamação" sozinha saiu da lista: o roteiro pergunta "Qual seria a sua
+# queixa (reclamação)?", e a resposta do paciente transferia a conversa.
+# Sem "atendimento com o doutor" (e agendar) nem "pessoa de verdade?" sozinho
+# (e a pergunta se fala com um robo, que tem resposta propria).
+_RX_PEDIDO_DE_PESSOA = _re_mod.compile(
+    r"\b(falar|conversar) com (um |uma |o |a |algum |alguma )?"
+    r"(atendente|humano|humana|pessoa|secretaria|recepcionista|recepcao|alguem|responsavel|equipe)\b"
+    r"|\b(quero|queria|preciso de|gostaria de|me passa (para|pra)) (um |uma |o |a )?"
+    r"(atendente|humano|pessoa de verdade|pessoa real)\b"
+    r"|\batendimento humano\b|\batendente humano\b"
+    r"|\b(fazer|registrar|abrir) uma reclamacao\b|\bquero reclamar\b")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -903,6 +917,11 @@ def handle_flush(user: str, items: list[dict]) -> None:
     if not _chegada:
         _chegada = time.monotonic() - BUFFER_SECONDS
     respondeu = False
+    # Linha [tempo]: onde foi o tempo do paciente (fila do webhook, banco, IA,
+    # envio). Reclamacao de 22/10: "cadastro completo" e resumo levavam 40 s.
+    _inicio_flush = time.monotonic()
+    _seg_ia = 0.0
+    db.iniciar_medicao()
     try:
         global_mode = int(database.get_setting("agent_mode", "1"))
         if not global_mode:
@@ -967,8 +986,10 @@ def handle_flush(user: str, items: list[dict]) -> None:
             try:
                 # So a pergunta, sem o historico: a resposta vira trava e
                 # tem de valer para qualquer paciente que pergunte o mesmo.
+                _t_ia = time.monotonic()
                 texto_modelo = llm.generate_reply(
                     history=[{"role": "user", "parts": [{"text": texto}]}], system=system)
+                _seg_ia = time.monotonic() - _t_ia
                 _, _violou = secretaria.montar(secretaria.Decisao(usar_llm=True), texto_modelo)
                 if texto_modelo and not _violou:
                     database.set_setting(chave_cache, texto_modelo)
@@ -989,8 +1010,14 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if abertura_retomada and mensagem:
             mensagem = f"{abertura_retomada}\n\n{mensagem}"
         respondeu = True
+        _banco_seg, _banco_idas = db.medicao()
+        _t_envio = time.monotonic()
         if mensagem:
             enviar_em_blocos(user, mensagem, _chegada)
+        _agora = time.monotonic()
+        print(f"[tempo] user={user} total={_agora - _chegada:.1f}s | ate o flush="
+              f"{_inicio_flush - _chegada:.1f}s | banco={_banco_seg:.1f}s em {_banco_idas} idas | "
+              f"ia={_seg_ia:.1f}s | envio={_agora - _t_envio:.1f}s | {decisao.tipos}")
 
         # Historico e nome do contato depois do envio: nao mudam a resposta e
         # eram idas ao banco que o paciente esperava.

@@ -308,6 +308,17 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
             d.tipos.append(f"captura:{ultima}")
 
     area_antes = ficha.get("area", "")
+    tinha_nome = bool(ficha.get("nome")) and not (capturou and ultima == "nome")
+    # "Sou a Ana, tenho dor na ATM" (teste de 22/10): o nome e a queixa vem
+    # juntos. Sem area conhecida, a leitura passiva nao acha a queixa; o que
+    # sobra depois do nome e a resposta a "em que posso ajudar?".
+    queixa_do_resto = False
+    if capturou and ultima == "nome" and not ficha.get("queixa") and texto:
+        resto = fp.limpar_queixa(texto)
+        if (clinica.normalizar(resto) != clinica.normalizar(texto)
+                and fp.capturar_resposta(ficha, "queixa", resto)):
+            queixa_do_resto = True
+            d.tipos.append("captura:queixa")
     mudou = fp.extrair_passivo(ficha, texto) if texto else []
     if mudou:
         d.tipos.append("passivo:" + ",".join(mudou))
@@ -317,6 +328,11 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
         capturou = True
         ficha["ultima_pergunta"] = ""
         d.tipos.append("captura:queixa")
+    # Nome e queixa nesta mensagem: o roteiro responde "Tudo bem, Ana.
+    # Entendido." e vai ao pre-cadastro, sem o texto de acolhimento da area.
+    nome_agora = ultima in ("nome", "") and not tinha_nome and bool(ficha.get("nome"))
+    queixa_agora = (queixa_do_resto or "queixa" in mudou
+                    or (capturou and ultima == "queixa"))
 
     # ── 5. Trauma: descartar gravidade antes de qualquer outra coisa ─────────
     if ficha.get("area") == "trauma" and not ficha.get("triagem_trauma"):
@@ -331,8 +347,10 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     travadas = clinica.respostas_travadas(texto) if texto else []
     # Dados do cadastro nao sao duvida: "Endereço completo: ..." disparava a
     # resposta do endereco do CONSULTORIO (teste do Dr. Fabricio, 12/10).
+    # Valor e "voce e um robo" continuam valendo: "Quero saber o valor primeiro"
+    # no meio do cadastro ia para a IA, que respondeu sobre o valor (22/10).
     if ultima in fp.CADASTRO and "?" not in texto:
-        travadas = []
+        travadas = [(tp, r) for tp, r in travadas if tp in ("preco", "identidade")]
     cobre_queixa = False
     for tipo, resposta in travadas:
         d.tipos.append(tipo)
@@ -345,7 +363,7 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     if (area and area != area_antes and area != "trauma"
             and ficha.get("intencao") != "pronto_agendar"
             # Roteiro do doutor: a resposta a queixa e so "Entendido." e o pre-cadastro.
-            and not (capturou and ultima == "queixa")):
+            and not queixa_agora):
         d.tipos.append(f"area:{area}")
         d.partes.append(clinica.AREAS[area]["acolhimento"])
 
@@ -362,7 +380,17 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
         d.usar_llm = True
         d.tipos.append("llm_livre")
 
-    if capturou and not d.partes and not d.usar_llm:
+    if (nome_agora or queixa_agora) and not d.partes and not d.usar_llm:
+        # Na abertura o nome ja vai na saudacao ("Boa noite, Ana!").
+        frases = []
+        if nome_agora and not abertura:
+            frases.append(f"Tudo bem, {ficha['nome'].split()[0]}.")
+        if queixa_agora:
+            frases.append("Entendido.")
+        d.confirmacao = " ".join(frases)
+        if ultima == "nome" and re.search(r"\btudo (bem|bom|certo)\b", t):
+            d.confirmacao += " Tudo ótimo por aqui."
+    elif capturou and not d.partes and not d.usar_llm:
         d.confirmacao = _confirmacao(ultima, ficha)
         # "Ana Paula, tudo bem?": responde ao cumprimento junto com o nome.
         if ultima == "nome" and re.search(r"\btudo (bem|bom|certo)\b", t):
@@ -398,7 +426,7 @@ def _confirmacao(campo: str, ficha: dict) -> str:
         ficha["aviso_cadastro"] = ""
         if aviso:
             return aviso
-        if all(ficha.get(c) for c in fp.CADASTRO):
+        if fp.cadastro_completo(ficha):
             return "Cadastro completo, obrigada. Agora vamos ao agendamento."
         return "Obrigada!"
     if campo == "nome" and ficha.get("nome"):
@@ -488,7 +516,10 @@ def _proximo_passo(ficha: dict, d: Decisao, cobre_queixa: bool, repetir: bool = 
     # versao curta. Repetir a frase inteira era texto a toa (teste de 07/10).
     repetida = bool(campo) and ficha.get("ultima_pergunta") == campo
     if campo:
-        fp.marcar_pergunta(ficha, campo)
+        # Pergunta do paciente respondida ("quanto custa?", "e um robo?") nao e
+        # tentativa frustrada: contada, o "Nome completo" virava "Não
+        # informado" sem ele ter recusado (teste de 22/10).
+        fp.marcar_pergunta(ficha, campo, contar=not (repetida and (d.partes or d.usar_llm)))
         if campo == "queixa" and cobre_queixa:
             return  # a resposta da seção 17 já pede a queixa
         d.pergunta_final = fp.pergunta_do_campo(ficha, campo, repetida=repetida)
