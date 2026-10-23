@@ -3718,7 +3718,10 @@ function renderGoogleStatus(g) {
     if (!g.configurado) {
         box.innerHTML = `<span class="muted google-chip-off" title="Para sincronizar, cadastre GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no Render.">Google Agenda: não configurado</span>`;
     } else if (!g.conectado) {
-        box.innerHTML = `<a class="btn-secondary btn-sm" href="/api/google/conectar">Conectar Google Agenda</a>`;
+        // Destacado em ambar: desconectado, a Agenda nao sincroniza com o Google.
+        box.innerHTML = `<a class="btn-secondary btn-sm google-conectar" href="/api/google/conectar"
+            title="Google Agenda desconectado: os agendamentos não estão indo para o Google">
+            <i class="google-conectar-ponto"></i>Conectar Google Agenda</a>`;
     } else {
         // So um selo: os detalhes abrem no clique, para nao poluir a Agenda.
         const a = g.atualizacao || {};
