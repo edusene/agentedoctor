@@ -9,6 +9,7 @@ que já está preenchido é perguntado de novo.
 
 from __future__ import annotations
 
+import difflib
 import re
 import time
 from datetime import datetime
@@ -467,6 +468,13 @@ def _cidade(texto: str) -> str:
     return _titulo(" ".join(palavras))
 
 
+def _medicos_citados(t: str) -> tuple[bool, bool]:
+    """(Fabrício citado, Tadeu citado), aceitando erro de digitação ("fabriciu")."""
+    palavras = re.findall(r"[a-z]+", t)
+    return (bool(difflib.get_close_matches("fabricio", palavras, n=1, cutoff=0.8)),
+            bool(difflib.get_close_matches("tadeu", palavras, n=1, cutoff=0.8)))
+
+
 def _medico_citado(t: str, exige_marca: bool = False) -> str:
     """Médico que o paciente escolheu em `t` (já normalizado); "" se não escolheu.
 
@@ -478,7 +486,7 @@ def _medico_citado(t: str, exige_marca: bool = False) -> str:
         t = re.sub(r"\bcom (?:o |a )?(fabricio|tadeu)\b", r"@\1", t)
         fab, tad = "@fabricio" in t, "@tadeu" in t
     else:
-        fab, tad = bool(re.search(r"\bfabricio\b", t)), bool(re.search(r"\btadeu\b", t))
+        fab, tad = _medicos_citados(t)
     if fab == tad:
         return ""
     # "Não quero o Tadeu" escolhe o outro.
@@ -626,7 +634,7 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         escolhido = _medico_citado(t)
         if escolhido:
             ficha["medico"] = escolhido
-        elif (re.search(r"\bfabricio\b", t) and re.search(r"\btadeu\b", t)) or nao_sabe or clinica.e_nao(bruto) or re.search(
+        elif all(_medicos_citados(t)) or nao_sabe or clinica.e_nao(bruto) or re.search(
                 r"\b(?:tanto faz|qualquer|ambos|os dois|sem preferencia|nao tenho|indiferente|nenhum)\b", t):
             ficha["medico"] = "Sem preferência"
         else:

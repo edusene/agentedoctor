@@ -367,7 +367,10 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     if (area and area != area_antes and area != "trauma"
             and ficha.get("intencao") != "pronto_agendar"
             # Roteiro do doutor: a resposta a queixa e so "Entendido." e o pre-cadastro.
-            and not queixa_agora):
+            and not queixa_agora
+            # Pergunta de valor (ou outra resposta travada) ja tem resposta: o texto da
+            # area vinha depois dela, solto, sem ligacao com o que foi perguntado (25/10).
+            and not travadas):
         d.tipos.append(f"area:{area}")
         d.partes.append(clinica.AREAS[area]["acolhimento"])
 
@@ -508,8 +511,11 @@ def _proximo_passo(ficha: dict, d: Decisao, cobre_queixa: bool, repetir: bool = 
         fp.marcar_pergunta(ficha, "queixa")
         return
     # Seção 13: curiosidade = responder e orientar, sem empurrar coleta.
+    # Foto/documento sem texto nao e duvida: logo apos o #reset ele recebia "posso
+    # te ajudar com mais alguma duvida?" no lugar de ser perguntado o nome (25/10).
     if (ficha.get("intencao") == "curiosidade" and not ficha.get("queixa")
             and not ficha.get("nome") and (d.partes or d.usar_llm)
+            and "arquivo" not in d.tipos
             and not ficha.get("cta_curiosidade_feito")):
         ficha["cta_curiosidade_feito"] = True
         ficha["ultima_pergunta"] = "cta_curiosidade"

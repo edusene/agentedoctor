@@ -413,6 +413,38 @@ class Fluxo(unittest.TestCase):
             self.assertEqual(conversa([frase])[0]["medico"], "", frase)
         self.assertIn("🥼 Dr. Tadeu\n📌",clinica.cartao_consulta_agendada("2026-08-02T15:00", preferencia="Dr. Tadeu"))
 
+    def test_foto_logo_apos_o_reset_pergunta_o_nome_e_nao_se_tem_duvida(self):
+        """Teste do Dr. Fabricio, 25/10: foto antes de dizer o nome recebia
+        'Posso te ajudar com mais alguma dúvida...?' em vez da pergunta do nome."""
+        ficha = fp.nova("1")
+        ficha["saudacao_feita"] = True
+        fp.marcar_pergunta(ficha, "nome")
+        d = secretaria.decidir(ficha, "", TARDE, midia="arquivo")
+        texto, _ = secretaria.montar(d, "")
+        self.assertNotIn(fp.PERGUNTA_CURIOSIDADE, texto)
+        self.assertIn(clinica.RESPOSTA_ARQUIVO_RECEBIDO, texto)
+        self.assertEqual(ficha["ultima_pergunta"], "nome")
+
+    def test_pergunta_de_valor_nao_traz_o_texto_da_area(self):
+        """Teste do Dr. Fabricio, 25/10: depois do valor vinha 'Entendi. O Dr. Fabrício
+        realiza extrações...', solto. A queixa tinha erro de digitação ('sis')."""
+        _, saidas = conversa(["Olá", "Eduardo", "Quero tirar o sis", "tanto faz",
+                              "quero saber primeiro o valor da consulta para tirar o siso"])
+        texto = saidas[-1][2]
+        self.assertIn("o valor da consulta é R$ 300", texto)
+        self.assertNotIn(clinica.AREAS["exodontia"]["acolhimento"], texto)
+        self.assertIn("Nome completo", texto)
+
+    def test_preferencia_de_medico_com_erro_de_digitacao(self):
+        for resposta, esperado in [("fabriciu", "Dr. Fabrício"), ("tadeo", "Dr. Tadeu"),
+                                   ("fabriciu ou tadeu, tanto faz", "Sem preferência")]:
+            with self.subTest(resposta=resposta):
+                f = fp.nova("1")
+                self.assertTrue(fp.capturar_resposta(f, "medico", resposta))
+                self.assertEqual(f["medico"], esperado)
+        # Nome parecido de paciente nao vira medico.
+        self.assertFalse(fp.capturar_resposta(fp.nova("1"), "medico", "fabiano"))
+
     def test_resumo_vai_numa_mensagem_so(self):
         _, saidas = conversa(self.CONVERSA)
         blocos = saidas[6][2].split("\n\n")
