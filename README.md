@@ -145,9 +145,12 @@ vazias, o agente responde que a equipe confirma, e **nunca inventa**:
 | `AGENTE_NOME` | nome da assistente, se houver |
 | `TZ_OFFSET_HORAS` | `-3` (Brasília) |
 
-Também é preciso configurar o WhatsApp do consultório (Datafy API):
-`DATAFY_TOKEN`, `DATAFY_PHONE_NUMBER_ID`, `DATAFY_WABA_ID`,
-`DATAFY_WEBHOOK_SECRET`, e apontar o webhook para `https://SEU-DOMINIO/webhook`.
+Também é preciso configurar o WhatsApp do consultório (API própria, AutoZap):
+`WHATSAPI_KEY` (chave `sk_live_...`), `WHATSAPI_PHONE_NUMBER_ID`, `WHATSAPI_URL`
+(termina em `/api/v1`) e `WHATSAPI_WEBHOOK_SECRET` (`whsec_...`). No painel da API,
+cadastre `https://SEU-DOMINIO/webhook` com o evento `message.received`.
+Os nomes antigos `DATAFY_PHONE_NUMBER_ID` e `DATAFY_WEBHOOK_SECRET` ainda são aceitos.
+Uma chave `sk_test_` valida o fluxo sem enviar de verdade.
 
 Comandos úteis no WhatsApp: `#reset` zera o atendimento e devolve a conversa ao
 agente. "Falar com atendente", "remarcar", "cancelar consulta" e parecidos
@@ -169,6 +172,6 @@ ingest_knowledge.py  sobe a base para o knowledge
 prompts/secretaria.md  prompt do modelo (dúvidas abertas)
 knowledge/           base de conhecimento oficial
 database.py, db.py   banco (SQLite ou PostgreSQL)
-meta.py              Datafy / Meta Cloud API
+meta.py              API de WhatsApp (AutoZap) sobre a Meta Cloud API
 scheduler.py         follow-ups automáticos do CRM
 ```

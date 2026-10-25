@@ -360,7 +360,7 @@
             <!-- WhatsApp Connection -->
             <div id="view-whatsapp" class="view">
                 <div class="wa-view-header">
-                    <h1>WhatsApp — Datafy API</h1>
+                    <h1>WhatsApp — API própria</h1>
                     <p class="subtitle">Status da conexao, configuracao da API e informacoes do numero.</p>
                 </div>
 
@@ -417,12 +417,12 @@
                                 </button>
                             </div>
                             <div class="wa-webhook-steps">
-                                <p class="wa-webhook-title">Como configurar no painel Datafy:</p>
+                                <p class="wa-webhook-title">Como configurar no painel da API de WhatsApp:</p>
                                 <ol>
-                                    <li>Acesse <a href="https://app.datafyapi.com.br" target="_blank" rel="noopener">app.datafyapi.com.br</a></li>
-                                    <li>Va em <strong>Configuracoes > Webhook</strong></li>
-                                    <li>Cole a URL acima no campo <strong>Webhook URL</strong></li>
-                                    <li>Ative o evento <strong>messages</strong></li>
+                                    <li>Acesse o painel da API (eduwhatsapi-elpj.onrender.com)</li>
+                                    <li>Va em <strong>Webhooks</strong> e cadastre uma URL</li>
+                                    <li>Cole a URL acima e copie o <strong>whsec_...</strong> para o campo Webhook Secret</li>
+                                    <li>Ative o evento <strong>message.received</strong></li>
                                 </ol>
                             </div>
                         </div>
@@ -458,9 +458,9 @@
                         <div id="wa-config-body" style="display:none;overflow:hidden">
                             <form id="wa-config-form" class="wa-config-form" onsubmit="saveWAConfig(event)">
                             <div class="wa-config-field">
-                                <label for="wa-cfg-token">Token Datafy</label>
+                                <label for="wa-cfg-token">Chave da API (sk_live_...)</label>
                                 <div class="wa-secret-wrap">
-                                    <input type="password" id="wa-cfg-token" name="DATAFY_TOKEN" class="wa-config-input" autocomplete="off">
+                                    <input type="password" id="wa-cfg-token" name="WHATSAPI_KEY" class="wa-config-input" autocomplete="off">
                                     <button type="button" class="wa-secret-toggle" onclick="toggleSecretVisibility('wa-cfg-token')" title="Mostrar/ocultar" aria-label="Mostrar/ocultar">
                                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                     </button>
@@ -468,16 +468,16 @@
                             </div>
                             <div class="wa-config-field">
                                 <label for="wa-cfg-phone">Phone Number ID</label>
-                                <input type="text" id="wa-cfg-phone" name="DATAFY_PHONE_NUMBER_ID" class="wa-config-input" placeholder="Ex: 106540352242922">
+                                <input type="text" id="wa-cfg-phone" name="WHATSAPI_PHONE_NUMBER_ID" class="wa-config-input" placeholder="Ex: 106540352242922">
                             </div>
                             <div class="wa-config-field">
-                                <label for="wa-cfg-waba">WABA ID</label>
-                                <input type="text" id="wa-cfg-waba" name="DATAFY_WABA_ID" class="wa-config-input" placeholder="Ex: 102290129340398">
+                                <label for="wa-cfg-waba">URL da API</label>
+                                <input type="text" id="wa-cfg-waba" name="WHATSAPI_URL" class="wa-config-input" placeholder="https://sua-api.onrender.com/api/v1">
                             </div>
                             <div class="wa-config-field">
                                 <label for="wa-cfg-secret">Webhook Secret</label>
                                 <div class="wa-secret-wrap">
-                                    <input type="password" id="wa-cfg-secret" name="DATAFY_WEBHOOK_SECRET" class="wa-config-input" autocomplete="off">
+                                    <input type="password" id="wa-cfg-secret" name="WHATSAPI_WEBHOOK_SECRET" class="wa-config-input" autocomplete="off">
                                     <button type="button" class="wa-secret-toggle" onclick="toggleSecretVisibility('wa-cfg-secret')" title="Mostrar/ocultar" aria-label="Mostrar/ocultar">
                                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                     </button>

@@ -16,7 +16,7 @@ if not os.environ.get("VERIFY_TESTES"):
     raise unittest.SkipTest("rode por: python verify.py --testes (trava contra producao)")
 
 os.environ.update(ADMIN_PASSWORD="senha-de-teste-123", SECRET_KEY="k" * 32,
-                  DATAFY_WEBHOOK_SECRET="segredo-de-teste")
+                  WHATSAPI_WEBHOOK_SECRET="segredo-de-teste")
 import db  # noqa: E402
 
 assert db.DB_DRIVER == "sqlite"
@@ -50,7 +50,7 @@ class TestPainel(unittest.TestCase):
     def test_editor_de_env_recusa_quebra_de_linha(self):
         c = cliente()
         c.post("/login", data={"username": "admin", "password": "senha-de-teste-123"})
-        r = c.post("/api/whatsapp/config", json={"DATAFY_TOKEN": "a\nDATABASE_URL=x"})
+        r = c.post("/api/whatsapp/config", json={"WHATSAPI_KEY": "a\nDATABASE_URL=x"})
         self.assertEqual(r.status_code, 400)
 
 
@@ -80,23 +80,84 @@ class TestWebhook(unittest.TestCase):
     def _assinado(self, corpo, segredo):
         ts = str(int(time.time()))
         sig = "sha256=" + hmac.new(segredo.encode(), f"{ts}.{corpo}".encode(), hashlib.sha256).hexdigest()
-        return {"Content-Type": "application/json", "x-datafy-signature-256": sig, "x-datafy-timestamp": ts}
+        return {"Content-Type": "application/json", "X-Webhook-Signature": sig, "X-Webhook-Timestamp": ts}
 
     def test_pedido_assinado_corretamente_passa(self):
         r = cliente().post("/webhook", data="{}", headers=self._assinado("{}", "segredo-de-teste"))
         self.assertEqual(r.status_code, 200)
 
     def test_segredo_trocado_no_painel_vale_sem_reiniciar(self):
-        with mock.patch.dict(os.environ, {"DATAFY_WEBHOOK_SECRET": "segredo-novo"}):
+        with mock.patch.dict(os.environ, {"WHATSAPI_WEBHOOK_SECRET": "segredo-novo"}):
             c = cliente()
             self.assertEqual(c.post("/webhook", data="{}", headers=self._assinado("{}", "segredo-novo")).status_code, 200)
             self.assertEqual(c.post("/webhook", data="{}", headers=self._assinado("{}", "segredo-de-teste")).status_code, 401)
 
     def test_assinatura_errada_e_recusada(self):
         r = cliente().post("/webhook", data="{}", headers={
-            "Content-Type": "application/json", "x-datafy-signature-256": "sha256=00",
-            "x-datafy-timestamp": "1"})
+            "Content-Type": "application/json", "X-Webhook-Signature": "sha256=00",
+            "X-Webhook-Timestamp": "1"})
         self.assertEqual(r.status_code, 401)
+
+
+class TestApiWhatsapp(unittest.TestCase):
+    """API propria de WhatsApp: formato do webhook e do envio (sem rede)."""
+
+    EVENTO = {"id": "x", "event": "message.received", "data": {
+        "phone_number_id": "123", "contact": {"wa_id": "5511999998888", "name": "Ana"},
+        "message": {"id": "wamid.X", "from": "5511999998888", "timestamp": "1", "type": "text",
+                    "text": {"body": "Ola"}}}}
+
+    def test_evento_vira_o_formato_da_meta(self):
+        d = app_mod._evento_para_formato_meta(self.EVENTO)
+        value = d["entry"][0]["changes"][0]["value"]
+        self.assertEqual(value["messages"][0]["text"]["body"], "Ola")
+        self.assertEqual(value["contacts"][0]["profile"]["name"], "Ana")
+        self.assertEqual(app_mod._evento_para_formato_meta({"event": "message.sent"}), {})
+
+    def test_envio_usa_a_rota_da_api_e_devolve_a_resposta_da_meta(self):
+        import meta
+        resp = mock.Mock(ok=True, status_code=201)
+        resp.json.return_value = {"data": {"id": "i", "wamid": "wamid.Y", "meta_response": {
+            "messages": [{"id": "wamid.Y"}], "contacts": [{"wa_id": "5511999998888"}]}}}
+        with mock.patch.object(meta, "_PHONE_ID", "123"), mock.patch.object(meta, "_TOKEN", "sk_test_x"),                 mock.patch.object(meta.requests, "request", return_value=resp) as rq:
+            r = meta.send_text("5511999998888", "Oi")
+        args, kw = rq.call_args
+        self.assertTrue(args[1].endswith("/whatsapp/123/messages"))
+        self.assertEqual(kw["json"], {"to": "5511999998888", "type": "text", "text": {"body": "Oi"}})
+        self.assertEqual(kw["headers"]["Authorization"], "Bearer sk_test_x")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["data"]["messages"][0]["id"], "wamid.Y")
+
+    def test_digitando_modelo_perfil_e_midia_usam_as_rotas_novas(self):
+        import meta
+        resp = mock.Mock(ok=True, status_code=200, headers={"Content-Type": "image/jpeg; x=1"}, content=b"IMG")
+        resp.json.return_value = {"data": {"success": True}}
+        with mock.patch.object(meta, "_PHONE_ID", "123"), mock.patch.object(meta.requests, "request", return_value=resp) as rq:
+            meta.send_typing("wamid.Z")
+            self.assertEqual(rq.call_args.kwargs["json"], {"message_id": "wamid.Z", "typing": True})
+            meta.create_template("aviso", "utility", "pt_BR", "Oi {{1}}")
+            body = rq.call_args.kwargs["json"]
+            self.assertEqual((body["category"], body["components"]), ("UTILITY", [{"type": "BODY", "text": "Oi {{1}}"}]))
+            meta.delete_template("aviso")
+            self.assertEqual(rq.call_args.args[:2][0], "DELETE")
+            self.assertTrue(rq.call_args.args[1].endswith("/whatsapp/123/templates/aviso"))
+            meta.update_business_profile(about="Clinica")
+            self.assertTrue(rq.call_args.args[1].endswith("/whatsapp/123/business_profile"))
+        with mock.patch.object(meta, "_PHONE_ID", "123"), mock.patch.object(meta.requests, "get", return_value=resp) as g:
+            info = meta.get_webhook_media_url("m1")
+            self.assertEqual(info["data"]["mime_type"], "image/jpeg")
+            self.assertEqual(meta.download_media_bytes(info["data"]["url"]), b"IMG")
+            self.assertEqual(g.call_count, 1)  # uma chamada por midia
+
+    def test_erro_da_api_vira_texto_com_o_motivo(self):
+        import meta
+        resp = mock.Mock(ok=False, status_code=429)
+        resp.json.return_value = {"error": {"code": "rate_limited", "message": "Muitas requisicoes"}}
+        with mock.patch.object(meta.requests, "request", return_value=resp):
+            r = meta.send_text("5511999998888", "Oi")
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["status"], 429)
+        self.assertIn("rate_limited", r["error"])
 
 
 class TestLimites(unittest.TestCase):

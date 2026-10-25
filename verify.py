@@ -60,7 +60,8 @@ def rodar_testes() -> int:
     import com override e mandariam o teste para o Supabase real."""
     import dotenv
     dotenv.load_dotenv = lambda *a, **k: False
-    for chave in ("DATABASE_URL", "DATAFY_TOKEN", "DATAFY_WEBHOOK_SECRET"):
+    for chave in ("DATABASE_URL", "DATAFY_TOKEN", "DATAFY_WEBHOOK_SECRET",
+                  "WHATSAPI_KEY", "WHATSAPI_WEBHOOK_SECRET", "WHATSAPI_PHONE_NUMBER_ID"):
         os.environ.pop(chave, None)
     os.environ["OPENAI_API_KEY"] = "sk-teste-falsa"
     os.environ["DB_DRIVER"] = "sqlite"

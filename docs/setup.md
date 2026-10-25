@@ -87,7 +87,7 @@ Dos 14 achados, corrigidos: segredo do webhook lido na hora (rotação pelo pain
 
 | Item | Causa | Próxima ação |
 |---|---|---|
-| F2: confirmar `DATAFY_WEBHOOK_SECRET` no Render | Sem acesso ao painel do Render daqui | Após o deploy, uma mensagem de teste deve chegar; se o log mostrar `Recusado`, definir a variável |
+| F2: confirmar `WHATSAPI_WEBHOOK_SECRET` (e `WHATSAPI_KEY`, `WHATSAPI_PHONE_NUMBER_ID`) no Render | Sem acesso ao painel do Render daqui | Após o deploy, uma mensagem de teste deve chegar; se o log mostrar `Recusado`, definir a variável |
 | Rate limit do login assume 1 salto de proxy (`ProxyFix(x_for=1)`) | Não dá para ver o `X-Forwarded-For` real do Render daqui; com Cloudflare na frente o IP seria compartilhado e o limite de 5/min viraria global | Conferir o cabeçalho nos logs do Render e ajustar `x_for` |
 | Cookie `Secure` depende de `RENDER` estar definido | Variável do Render, não verificada daqui | Conferir o login no Render após o deploy |
 | Render instala `requirements.txt` (sem pins) | Comando de build é decisão de deploy | Trocar para `requirements.lock`, se quiser versões fixas |

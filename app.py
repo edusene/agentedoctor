@@ -1,6 +1,6 @@
 """
 app.py — Secretária virtual do Dr. Fabrício Guimarães no WhatsApp.
-Flask webhook (Datafy / Meta Cloud API) + pipeline do agente + painel CRM.
+Flask webhook (API de WhatsApp (AutoZap) / Meta Cloud API) + pipeline do agente + painel CRM.
 
 O atendimento segue a base de conhecimento do consultório
 (knowledge/base_conhecimento_dr_fabricio.md). As respostas que não podem
@@ -69,17 +69,17 @@ if SECRET_KEY in ("", "troque_esta_chave_secreta_aleatoria"):
     import secrets as _secrets
     SECRET_KEY = _secrets.token_hex(32)
     print("[auth] AVISO: SECRET_KEY nao definida; usando chave aleatoria (sessoes caem a cada deploy)")
-DATAFY_WEBHOOK_SECRET = os.getenv("DATAFY_WEBHOOK_SECRET", "")
-# Pedido sem assinatura valida e recusado, e sem DATAFY_WEBHOOK_SECRET o webhook
-# recusa tudo. "0" desliga a exigencia (so para emergencia) sem precisar de deploy.
-WEBHOOK_EXIGE_ASSINATURA = os.getenv("WEBHOOK_EXIGE_ASSINATURA", "1") != "0"
-if WEBHOOK_EXIGE_ASSINATURA and not DATAFY_WEBHOOK_SECRET:
-    print("[webhook] ERRO: DATAFY_WEBHOOK_SECRET nao definido; o webhook vai recusar todo pedido")
-
-
 def _segredo_webhook() -> str:
     # Lido na hora: o painel grava o segredo novo no os.environ sem reiniciar o app.
-    return os.getenv("DATAFY_WEBHOOK_SECRET", "")
+    # DATAFY_WEBHOOK_SECRET e o nome antigo, aceito para nao quebrar quem ainda o usa.
+    return os.getenv("WHATSAPI_WEBHOOK_SECRET") or os.getenv("DATAFY_WEBHOOK_SECRET", "")
+
+
+# Pedido sem assinatura valida e recusado, e sem WHATSAPI_WEBHOOK_SECRET o webhook
+# recusa tudo. "0" desliga a exigencia (so para emergencia) sem precisar de deploy.
+WEBHOOK_EXIGE_ASSINATURA = os.getenv("WEBHOOK_EXIGE_ASSINATURA", "1") != "0"
+if WEBHOOK_EXIGE_ASSINATURA and not _segredo_webhook():
+    print("[webhook] ERRO: WHATSAPI_WEBHOOK_SECRET nao definido; o webhook vai recusar todo pedido")
 
 _DIR = Path(__file__).parent
 PROMPT_PATH = _DIR / "prompts" / "secretaria.md"
@@ -480,15 +480,13 @@ def _build_user_parts(items: list[dict]) -> list[dict]:
                         if info.get("ok") and isinstance(info.get("data"), dict):
                             url = info["data"].get("url", "")
                             mime_from_api = info["data"].get("mime_type", "application/octet-stream")
-                            if url:
-                                import requests as _req
-                                resp = _req.get(url, timeout=30)
-                                if resp.status_code == 200:
-                                    import base64 as _b64
-                                    b64_data = _b64.b64encode(resp.content).decode()
-                                    media_url = f"data:{_mime_seguro(mime_from_api)};base64,{b64_data}"
-                                    database.update_message_media(msg["id"], media_url)
-                                    print(f"[flush] on-demand download ok msg={msg['id']} mime={mime_from_api}")
+                            conteudo = download_media_bytes(url) if url else b""
+                            if conteudo:
+                                import base64 as _b64
+                                b64_data = _b64.b64encode(conteudo).decode()
+                                media_url = f"data:{_mime_seguro(mime_from_api)};base64,{b64_data}"
+                                database.update_message_media(msg["id"], media_url)
+                                print(f"[flush] on-demand download ok msg={msg['id']} mime={mime_from_api}")
                     except Exception as e:
                         print(f"[flush] WARN on-demand download falhou msg={msg_id}: {e}")
 
@@ -847,7 +845,7 @@ def _espelhar_no_painel(user: str, enviados: list[tuple[str, str]]) -> None:
             print(f"[painel] WARN nao espelhou resposta p/ {clinica.mascarar_fone(user)}: {e}")
 
 
-# Falha passageira da Datafy (rede, timeout, 429, 5xx): tenta de novo antes de
+# Falha passageira da API de WhatsApp (rede, timeout, 429, 5xx): tenta de novo antes de
 # desistir. Erro 4xx de verdade (numero invalido etc.) nao adianta repetir.
 _ESPERAS_REENVIO = (1.5, 4.0)
 
@@ -1441,8 +1439,7 @@ try:
 except Exception as e:
     print(f"[crm] WARN: scheduler nao iniciado: {e}")
 
-print(f"[config] Datafy API: PHONE_ID={os.getenv('DATAFY_PHONE_NUMBER_ID', '') or 'N/A'}")
-print(f"[config] Datafy API: WABA_ID={os.getenv('DATAFY_WABA_ID', '') or 'N/A'}")
+print(f"[config] API de WhatsApp: {meta._BASE} PHONE_ID={meta.get_phone_id() or 'N/A'}")
 
 # ── Auth routes ───────────────────────────────────────────────────────────────
 
@@ -1485,16 +1482,31 @@ def add_security_headers(response):
 
 @app.get("/webhook")
 def webhook_verify():
-    """Para a Datafy API essa rota não é chamada da mesma maneira que a Meta chama com GET."""
-    return "Datafy API endpoint", 200
+    """A API de WhatsApp só faz POST aqui; o GET serve para conferir que o endereço responde."""
+    return "WhatsApp API endpoint", 200
+
+
+def _evento_para_formato_meta(data: dict) -> dict:
+    """Envelope da API ({"event", "data": {contact, message}}) -> o formato da Meta que o resto lê."""
+    if data.get("event") != "message.received":
+        return {}
+    d = data.get("data") or {}
+    contato = d.get("contact") or {}
+    value = {"messages": [d.get("message") or {}]}
+    if contato.get("wa_id"):
+        value["contacts"] = [{"wa_id": contato["wa_id"], "profile": {"name": contato.get("name", "")}}]
+    return {"object": "whatsapp_business_account",
+            "entry": [{"changes": [{"field": "messages", "value": value}]}]}
 
 
 @app.post("/webhook")
 @limiter.exempt
 def webhook():
-    # Validação Datafy
-    signature = request.headers.get("x-datafy-signature-256", "")
-    timestamp = request.headers.get("x-datafy-timestamp", "")
+    # X-Webhook-* da API de WhatsApp; os x-datafy-* seguem aceitos (mesmo calculo).
+    signature = (request.headers.get("X-Webhook-Signature")
+                 or request.headers.get("x-datafy-signature-256", ""))
+    timestamp = (request.headers.get("X-Webhook-Timestamp")
+                 or request.headers.get("x-datafy-timestamp", ""))
     request.max_content_length = 1024 * 1024  # webhook so recebe JSON pequeno; midia vem por URL
     raw_body = request.get_data(as_text=True)
 
@@ -1502,7 +1514,7 @@ def webhook():
     # passar por paciente e fazer o bot mandar mensagem pelo numero do consultorio.
     segredo = _segredo_webhook()
     if WEBHOOK_EXIGE_ASSINATURA and not (segredo and signature and timestamp):
-        print("[webhook] Recusado: sem assinatura ou DATAFY_WEBHOOK_SECRET nao definido")
+        print("[webhook] Recusado: sem assinatura ou WHATSAPI_WEBHOOK_SECRET nao definido")
         return "Forbidden", 401
 
     if segredo and signature and timestamp:
@@ -1513,21 +1525,26 @@ def webhook():
         ).hexdigest()
 
         if not hmac.compare_digest(signature.encode("utf-8"), expected.encode("utf-8")):
-            print("[webhook] Assinatura invalida (Datafy)")
+            print("[webhook] Assinatura invalida")
             return "Forbidden", 401
 
         try:
             req_ts = int(timestamp)
             if abs(time.time() - req_ts) > 300:
-                print("[webhook] Timestamp fora do limite de 5 minutos (Datafy)")
+                print("[webhook] Timestamp fora do limite de 5 minutos")
                 return "Forbidden", 401
         except ValueError:
-            print("[webhook] Timestamp invalido (Datafy)")
+            print("[webhook] Timestamp invalido")
             return "Forbidden", 401
 
     data = request.get_json(silent=True) or {}
+    if "event" in data:
+        if data["event"] == "message.status.updated":
+            st = (data.get("data") or {}).get("status") or {}
+            print(f"[webhook] status: {st.get('status') if isinstance(st, dict) else st}")
+        data = _evento_para_formato_meta(data)
 
-    # Validacao basica Meta / Datafy
+    # Validacao basica: formato da Meta
     if data.get("object") != "whatsapp_business_account":
         print(f"[webhook] object invalido: {data.get('object')}")
         return jsonify({"ok": True})
@@ -1585,7 +1602,7 @@ def webhook():
                 print(f"[webhook] REENTREGA ignorada (memoria) wamid={message_id} from={clinica.mascarar_fone(number)}")
                 continue
 
-            # Marca como lido em background. E uma chamada de rede a Datafy
+            # Marca como lido em background. E uma chamada de rede a API de WhatsApp
             # (0,9s medido em producao) cujo resultado ninguem espera: o tique
             # azul no celular do cliente nao muda uma virgula da resposta.
             # Segurava o debounce sem motivo.
@@ -1836,7 +1853,7 @@ def api_conversations_mark_read(conv_id):
             if msgs:
                 wa_mid = msgs[0].get("wa_message_id", "")
                 if wa_mid:
-                    # Chamada a Datafy (~1 s) que ninguem espera: em segundo
+                    # Chamada a API de WhatsApp (~1 s) que ninguem espera: em segundo
                     # plano, como no webhook.
                     threading.Thread(target=_marcar_lido_async, args=(str(wa_mid),),
                                      daemon=True).start()
@@ -3335,13 +3352,13 @@ def api_whatsapp_upload_media():
     return jsonify({"ok": True, "media_id": data.get("id", ""), "data": data})
 
 
-# ── WhatsApp — Conexao e Configuracao (Datafy) ──────────────────────────────
+# ── WhatsApp — Conexao e Configuracao (API de WhatsApp) ──────────────────────────────
 
 _ENV_KEYS = [
-    ("DATAFY_TOKEN", "Token Datafy", True),
-    ("DATAFY_PHONE_NUMBER_ID", "Phone Number ID", False),
-    ("DATAFY_WABA_ID", "WABA ID", False),
-    ("DATAFY_WEBHOOK_SECRET", "Webhook Secret", True),
+    ("WHATSAPI_KEY", "Chave da API de WhatsApp (sk_live_...)", True),
+    ("WHATSAPI_PHONE_NUMBER_ID", "Phone Number ID", False),
+    ("WHATSAPI_URL", "URL da API (termina em /api/v1)", False),
+    ("WHATSAPI_WEBHOOK_SECRET", "Webhook Secret (whsec_...)", True),
     ("WEBHOOK_URL", "URL Webhook", False),
     ("OPENAI_API_KEY", "OpenAI API Key", True),
     ("OPENAI_MODEL", "Modelo OpenAI", False),
@@ -3401,7 +3418,7 @@ def _write_env_file(updates: dict[str, str]) -> None:
 @app.get("/api/whatsapp/connection")
 @login_required
 def api_whatsapp_connection():
-    """Testa conexao com a Datafy API e retorna dados da instância."""
+    """Testa conexao com a API de WhatsApp e retorna dados da instância."""
     problem = meta.config_problem()
     if problem:
         return jsonify({"ok": False, "error": problem})
@@ -3410,7 +3427,7 @@ def api_whatsapp_connection():
     if not r.get("ok"):
         return jsonify({
             "ok": False,
-            "error": r.get("error", "Erro ao conectar com Datafy"),
+            "error": r.get("error", "Erro ao conectar com a API de WhatsApp"),
             "phone_number_id": get_phone_id(),
             "waba_id": get_waba_id(),
         })

@@ -32,7 +32,7 @@ Prontuário, cobrança, convênios, agenda separada por médico ou múltiplas cl
 
 ## Restrições e decisões técnicas
 
-Python 3 + Flask, Supabase (PostgreSQL + pgvector) como banco, OpenAI para as dúvidas abertas e embeddings, Datafy (WhatsApp) e Render para hospedagem. Detalhes e motivos em [docs/architecture.md](docs/architecture.md). Origem: o projeto nasceu como cópia de um bot de loja; nada da loja deve ser reutilizado (credenciais, banco, WhatsApp).
+Python 3 + Flask, Supabase (PostgreSQL + pgvector) como banco, OpenAI para as dúvidas abertas e embeddings, API própria de WhatsApp (AutoZap) e Render para hospedagem. Detalhes e motivos em [docs/architecture.md](docs/architecture.md). Origem: o projeto nasceu como cópia de um bot de loja; nada da loja deve ser reutilizado (credenciais, banco, WhatsApp).
 
 ## Suposições e decisões pendentes
 

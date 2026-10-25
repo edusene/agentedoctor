@@ -17,7 +17,7 @@ Todos os módulos ficam na raiz (estrutura plana, sem pacote).
 | `llm.py`, `memory.py` | Cliente OpenAI (tool calling) e histórico em memória |
 | `knowledge_rag.py`, `ingest_knowledge.py`, `knowledge_repair.py`, `documentos.py` | RAG: chunking, embeddings, busca, ingestão e extração de PDF/DOCX |
 | `database.py`, `db.py` | Camada de dados do painel/CRM e abstração SQLite/PostgreSQL com pool |
-| `meta.py` | Cliente Datafy/Meta: envio, mídia, templates, perfil |
+| `meta.py` | Cliente da API de WhatsApp (AutoZap): envio, mídia, modelos, perfil comercial, indicador de digitando |
 | `google_agenda.py`, `horarios.py` | Google Calendar (OAuth, opcional) e vagas livres |
 | `scheduler.py` | APScheduler: follow-ups e automações do CRM |
 | `buffer.py`, `events.py`, `auth.py` | Debounce por usuário, SSE e login do painel |
@@ -27,9 +27,9 @@ Todos os módulos ficam na raiz (estrutura plana, sem pacote).
 
 ## Fronteiras e fluxo
 
-`Datafy → /webhook (assinatura HMAC) → MessageBuffer → handle_flush → secretaria.decidir (código) → [dúvida aberta: knowledge_rag + llm → clinica.conferir_resposta] → meta.send_text`. A ficha e o histórico vão ao banco a cada passo. Quem faz as perguntas do funil é o código; o modelo nunca decide o fluxo nem informa preço. O painel (`login_required`) lê e escreve pelas rotas `/api/...` e recebe atualizações por SSE (`events.py`).
+`API de WhatsApp → /webhook (evento `message.received`, assinatura HMAC `X-Webhook-Signature`) → MessageBuffer → handle_flush → secretaria.decidir (código) → [dúvida aberta: knowledge_rag + llm → clinica.conferir_resposta] → meta.send_text`. A ficha e o histórico vão ao banco a cada passo. Quem faz as perguntas do funil é o código; o modelo nunca decide o fluxo nem informa preço. O painel (`login_required`) lê e escreve pelas rotas `/api/...` e recebe atualizações por SSE (`events.py`).
 
-Pontos de confiança: (1) webhook externo, exige assinatura com `DATAFY_WEBHOOK_SECRET` (`WEBHOOK_EXIGE_ASSINATURA=0` desliga); (2) painel, sessão Flask com `SECRET_KEY` sem padrão; (3) texto do paciente, que chega ao modelo e é conferido na saída; (4) arquivos enviados ao knowledge.
+Pontos de confiança: (1) webhook externo, exige assinatura com `WHATSAPI_WEBHOOK_SECRET` (`WEBHOOK_EXIGE_ASSINATURA=0` desliga); (2) painel, sessão Flask com `SECRET_KEY` sem padrão; (3) texto do paciente, que chega ao modelo e é conferido na saída; (4) arquivos enviados ao knowledge.
 
 ## Dados e migrações
 

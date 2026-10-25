@@ -2634,7 +2634,7 @@ async function handleDeleteAll(e) {
     }
 }
 
-/* ── WhatsApp (Datafy) ─────────────────────────────────────────────────────── */
+/* ── WhatsApp (API própria) ─────────────────────────────────────────────────────── */
 async function loadWAConnection() {
     const el = document.getElementById('wa-status');
     if (!el) return;
@@ -2661,7 +2661,7 @@ async function loadWAConnection() {
             document.getElementById('wa-info-grid').style.display = 'none';
             return;
         }
-        el.innerHTML = '<span class="wa-status-pill open"><span class="pulse-dot green"></span>Conectado a Datafy API</span>';
+        el.innerHTML = '<span class="wa-status-pill open"><span class="pulse-dot green"></span>Conectado à API de WhatsApp</span>';
         const infoGrid = document.getElementById('wa-info-grid');
         infoGrid.style.display = 'grid';
         document.getElementById('wa-phone').textContent = data.display_phone || data.phone_number_id || '-';

@@ -3,7 +3,7 @@
 ## Produto e stack
 
 - Produto e escopo: `PRODUCT.md`. Arquitetura: `docs/architecture.md`. Setup e evidências: `docs/setup.md`.
-- Stack: Python 3 (testado em 3.14) + Flask, Supabase PostgreSQL/pgvector (SQLite só offline), OpenAI, Datafy, Render. Gerenciador: `pip` + `requirements.txt`; venv em `.venv`. Sem Node, sem build.
+- Stack: Python 3 (testado em 3.14) + Flask, Supabase PostgreSQL/pgvector (SQLite só offline), OpenAI, API própria de WhatsApp (AutoZap), Render. Gerenciador: `pip` + `requirements.txt`; venv em `.venv`. Sem Node, sem build.
 - Repositório **público**. Dado de paciente é dado de saúde: só dados fictícios em teste, log e doc.
 
 ## Comandos canônicos
