@@ -240,7 +240,8 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
             # mesmo que o paciente ja tenha perguntado - e a confirmacao.
             d.tipos.append("valor")
             d.partes.append(clinica.resposta_valor(ficha.get("area", ""),
-                                                   ficha.get("queixa", "")))
+                                                   ficha.get("queixa", ""),
+                                                   ficha.get("medico", "")))
             orientacoes = clinica.orientacoes_pre_consulta(ficha)
             if orientacoes:
                 d.partes.append(orientacoes)
@@ -304,6 +305,11 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
         if capturou:
             ficha["ultima_pergunta"] = ""
             d.tipos.append(f"captura:{ultima}")
+        elif ultima in fp.CADASTRO and ficha.get("aviso_cadastro"):
+            # CPF invalido de novo: avisa, em vez de repetir a pergunta muda.
+            d.partes.append(ficha["aviso_cadastro"])
+            ficha["aviso_cadastro"] = ""
+            d.tipos.append("cadastro_invalido")
 
     area_antes = ficha.get("area", "")
     tinha_nome = bool(ficha.get("nome")) and not (capturou and ultima == "nome")
@@ -440,6 +446,7 @@ def _confirmacao(campo: str, ficha: dict) -> str:
                 else "Tudo bem.")
     return {
         "queixa": "Entendido.",
+        "medico": "Perfeito.",
         "detalhe_area": "Obrigada pelos detalhes.",
         "tempo_queixa": "Entendi.",
         "cidade": "Perfeito.",

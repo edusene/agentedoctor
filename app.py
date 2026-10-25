@@ -2852,7 +2852,8 @@ def _salvar_horario(ag_id: int, remarcar: bool):
     avisado = False
     if data.get("avisar", True):
         # Cartao do roteiro do doutor (23/10): medicos, dia, hora e local.
-        texto = clinica.cartao_consulta_agendada(inicio, remarcada=remarcar)
+        texto = clinica.cartao_consulta_agendada(
+            inicio, remarcada=remarcar, preferencia=(ag.get("ficha") or {}).get("medico", ""))
         avisado = _avisar_paciente(ag, texto)
     events.emit("agendamento_atualizado", {"id": ag_id, "status": ag["status"]})
     return jsonify({"ok": True, "agendamento": database.obter_agendamento(ag_id),

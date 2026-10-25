@@ -26,7 +26,7 @@ import database
 # -> dias e horarios -> saude. Detalhes da area, exames e primeira/retorno
 # sairam do funil; o que o paciente contar sozinho a ficha ainda guarda.
 CADASTRO = ["nome_completo", "nascimento", "cpf", "rg", "email", "endereco", "cep"]
-ORDEM = ["nome", "queixa", *CADASTRO, "disponibilidade", "saude"]
+ORDEM = ["nome", "queixa", "medico", *CADASTRO, "disponibilidade", "saude"]
 CAMPOS_EXTRAS = ["avaliacao_previa", "tempo_queixa", "cidade", "detalhe_area", "exames",
                  "tipo_consulta"]
 
@@ -41,6 +41,7 @@ ROTULOS = {
     "cep": "CEP",
     "telefone": "Telefone",
     "queixa": "Queixa principal",
+    "medico": "Preferência de médico",
     "detalhe_area": "Detalhes",
     "tempo_queixa": "Há quanto tempo",
     "avaliacao_previa": "Avaliação/indicação",
@@ -58,6 +59,7 @@ PERGUNTAS = {
     "nome": "Qual o seu nome e em que posso ajudar?",
     "queixa": ("Poderia me adiantar qual seria o motivo da sua consulta? Qual seria a sua "
                "queixa (reclamação)?"),
+    "medico": "Você tem preferência de atendimento com o Dr. Fabrício ou com o Dr. Tadeu?",
     "exames": "Você tem exames (radiografia, tomografia, laudo) ou algum encaminhamento?",
     "nome_completo": "Qual é o seu nome completo?",
     "nascimento": "Qual é a sua data de nascimento?",
@@ -274,7 +276,7 @@ def marcar_pergunta(ficha: dict, campo: str, contar: bool = True) -> None:
         ficha["tentativas"] = t
 
 
-_ORDEM_RESUMO = ["nome", "telefone", "para_quem", "queixa", "detalhe_area", "exames",
+_ORDEM_RESUMO = ["nome", "telefone", "para_quem", "queixa", "medico", "detalhe_area", "exames",
                  "avaliacao_previa", "tempo_queixa", *CADASTRO, "cidade",
                  "disponibilidade", "tipo_consulta", "saude"]
 
@@ -592,6 +594,19 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         ficha["queixa"] = limpar_queixa(bruto)[:300]
         return True
 
+    if campo == "medico":
+        fab, tad = re.search(r"\bfabricio\b", t), re.search(r"\btadeu\b", t)
+        if bool(fab) != bool(tad):
+            # "Não quero o Tadeu" escolhe o outro.
+            recusado = re.search(r"\bnao (?:quero|gosto|prefiro|pode)\b", t)
+            ficha["medico"] = "Dr. Tadeu" if bool(fab) == bool(recusado) else "Dr. Fabrício"
+        elif (fab and tad) or nao_sabe or clinica.e_nao(bruto) or re.search(
+                r"\b(?:tanto faz|qualquer|ambos|os dois|sem preferencia|nao tenho|indiferente|nenhum)\b", t):
+            ficha["medico"] = "Sem preferência"
+        else:
+            return False
+        return True
+
     if campo == "cidade":
         if re.search(r"\b(?:aqui|daqui|mesma cidade|nessa cidade|aqui mesmo)\b", t):
             ficha["cidade"] = "Mesma cidade do consultório"
@@ -612,10 +627,11 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
             ficha[campo] = NAO_INFORMADO
             return True
         achados = extrair_cadastro(bruto, campo_esperado=campo)
+        # O aviso vale so para esta mensagem: um aviso antigo nao vaza para o
+        # turno em que o dado chega certo (teste do Dr. Fabricio, 24/10).
+        ficha["aviso_cadastro"] = achados.get("_aviso", "")
         for c, v in achados.items():
-            if c == "_aviso":
-                ficha["aviso_cadastro"] = v
-            elif not ficha.get(c):
+            if c != "_aviso" and not ficha.get(c):
                 ficha[c] = v
         _rg_que_era_o_cep(ficha)
         return any(c != "_aviso" for c in achados)
@@ -946,6 +962,8 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
         m = _RX_ENDERECO.search(resto)
         if m:
             achado = " ".join(resto[m.start():].replace("\n", ", ").split()).strip(" ,;.")
+            # Tirar o "Cep 76822340." do meio deixa ". ." no lugar.
+            achado = re.sub(r"\.(?:\s*\.)+", ".", achado)
             if not _so_modelo(achado):
                 achados["endereco"] = achado
             resto = resto[:m.start()]

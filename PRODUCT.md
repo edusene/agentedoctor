@@ -12,7 +12,7 @@ O consultório de cirurgia bucomaxilofacial recebe pacientes pelo WhatsApp. A se
 
 ## Fluxos críticos (implementados)
 
-1. **Atendimento**: nome → motivo da consulta → pré-cadastro (nome completo, nascimento, CPF, RG, e-mail, endereço com CEP) → dias e horários → saúde → resumo → confirmação → cartão de valor. A ordem fica em `ficha_paciente.ORDEM`.
+1. **Atendimento**: nome → motivo da consulta → preferência de médico (Dr. Fabrício, Dr. Tadeu ou sem preferência; pedido do doutor em 24/10) → pré-cadastro (nome completo, nascimento, CPF, RG, e-mail, endereço com CEP) → dias e horários → saúde → resumo → confirmação → cartão de valor. A ordem fica em `ficha_paciente.ORDEM`.
 2. **Dúvida aberta**: resposta travada em código quando existe; senão, modelo + RAG, com a saída conferida por `clinica.conferir_resposta()`.
 3. **Emergência**: sinais de urgência recebem a orientação de pronto-socorro/SAMU (192) e a conversa vai para a equipe.
 4. **Fila humana**: pedido de atendente, remarcar ou cancelar transfere para a equipe; o agente fica calado enquanto a equipe atende.
@@ -28,7 +28,7 @@ O consultório de cirurgia bucomaxilofacial recebe pacientes pelo WhatsApp. A se
 
 ## Fora do escopo
 
-Prontuário, cobrança, convênios, múltiplos médicos ou clínicas, perfis de acesso, app mobile. O CRM é só automação de mensagens (lembretes e marketing). Não reintroduzir tempo de queixa, cidade, indicação, exames nem primeira consulta/retorno no funil sem pedido do doutor.
+Prontuário, cobrança, convênios, agenda separada por médico ou múltiplas clínicas (a preferência só muda o nome nos cartões; o valor depende do motivo), perfis de acesso, app mobile. O CRM é só automação de mensagens (lembretes e marketing). Não reintroduzir tempo de queixa, cidade, indicação, exames nem primeira consulta/retorno no funil sem pedido do doutor.
 
 ## Restrições e decisões técnicas
 

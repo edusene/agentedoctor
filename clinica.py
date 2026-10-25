@@ -180,6 +180,14 @@ RESPOSTA_ENCAMINHADO = (
 # ── Roteiro do Dr. Fabricio (23/10): valor da consulta e consulta agendada ───
 # Texto e valores do doutor, travados aqui: o modelo nunca fala de valor.
 MEDICOS = "Dr. Tadeu / Dr. Fabrício"
+PREFERENCIAS_MEDICO = ("Dr. Fabrício", "Dr. Tadeu")
+
+
+def medicos(preferencia: str = "") -> str:
+    """Quem aparece nos cartoes: o escolhido; sem preferencia, os dois."""
+    return preferencia if preferencia in PREFERENCIAS_MEDICO else MEDICOS
+
+
 LOCAL_CONSULTA = "Clínica Omnilux / Av. Lauro Sodré, 2800, Bairro Costa e Silva - Porto Velho - RO"
 
 # R$ 400: ATM, apneia, ortognática e estéticas. R$ 300: siso, enxerto,
@@ -207,9 +215,9 @@ def valor_da_consulta(area: str, queixa: str = "") -> int | None:
     return _VALOR_POR_AREA.get(area or "")
 
 
-def cartao_valor(valor: int) -> str:
+def cartao_valor(valor: int, preferencia: str = "") -> str:
     # Linhas simples (sem linha em branco): o cartao chega numa bolha so.
-    return (f"🥼 {MEDICOS}\n"
+    return (f"🥼 {medicos(preferencia)}\n"
             f"•  Valor da Consulta: R$ {valor}\n"
             "✅ O valor da consulta é pago no final da sessão\n"
             "✅ Fornecimento de Recibo/Nota Fiscal da Consulta\n"
@@ -226,10 +234,10 @@ TABELA_VALORES = (
 )
 
 
-def resposta_valor(area: str, queixa: str = "") -> str:
+def resposta_valor(area: str, queixa: str = "", preferencia: str = "") -> str:
     """Cartao do fim do atendimento: confirma o valor com o paciente."""
     valor = valor_da_consulta(area, queixa)
-    return cartao_valor(valor) if valor else RESPOSTA_VALOR_A_CONFIRMAR
+    return cartao_valor(valor, preferencia) if valor else RESPOSTA_VALOR_A_CONFIRMAR
 
 
 def resposta_pergunta_valor(area: str, queixa: str = "") -> str:
@@ -249,12 +257,12 @@ _DIAS_SEMANA_CAP = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-fei
                     "Sexta-feira", "Sábado", "Domingo"]
 
 
-def cartao_consulta_agendada(inicio: str, remarcada: bool = False) -> str:
+def cartao_consulta_agendada(inicio: str, remarcada: bool = False, preferencia: str = "") -> str:
     """'2026-08-02T15:00' -> cartao da consulta agendada, no formato do doutor."""
     d = datetime.fromisoformat(inicio)
     titulo = "Sua Consulta foi remarcada:" if remarcada else "Sua Consulta foi agendada:"
     return (f"{titulo}\n"
-            f"🥼 {MEDICOS}\n"
+            f"🥼 {medicos(preferencia)}\n"
             f"📌 Dia {d.strftime('%d/%m')} ({_DIAS_SEMANA_CAP[d.weekday()]})\n"
             f"⏱️ {d.strftime('%H:%M')} horas\n"
             f"🏥 {LOCAL_CONSULTA}")
