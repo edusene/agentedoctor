@@ -119,8 +119,17 @@ class TestApiWhatsapp(unittest.TestCase):
         resp = mock.Mock(ok=True, status_code=201)
         resp.json.return_value = {"data": {"id": "i", "wamid": "wamid.Y", "meta_response": {
             "messages": [{"id": "wamid.Y"}], "contacts": [{"wa_id": "5511999998888"}]}}}
-        with mock.patch.object(meta, "_PHONE_ID", "123"), mock.patch.object(meta, "_TOKEN", "sk_test_x"),                 mock.patch.object(meta.requests, "request", return_value=resp) as rq:
+        resp.json.return_value["data"]["content"] = {"body": "TEXTO-SECRETO"}
+        resp.json.return_value["request_id"] = "req1"
+        import contextlib
+        import io as _io
+        saida = _io.StringIO()
+        with mock.patch.object(meta, "_PHONE_ID", "123"), mock.patch.object(meta, "_TOKEN", "sk_test_x"),                 mock.patch.object(meta.requests, "request", return_value=resp) as rq,                 contextlib.redirect_stdout(saida):
             r = meta.send_text("5511999998888", "Oi")
+        # O log nao leva o texto enviado nem o telefone inteiro.
+        self.assertNotIn("TEXTO-SECRETO", saida.getvalue())
+        self.assertNotIn("5511999998888", saida.getvalue())
+        self.assertIn("req1", saida.getvalue())
         args, kw = rq.call_args
         self.assertTrue(args[1].endswith("/whatsapp/123/messages"))
         self.assertEqual(kw["json"], {"to": "5511999998888", "type": "text", "text": {"body": "Oi"}})

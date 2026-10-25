@@ -1543,6 +1543,8 @@ def webhook():
             st = (data.get("data") or {}).get("status") or {}
             print(f"[webhook] status: {st.get('status') if isinstance(st, dict) else st}")
         data = _evento_para_formato_meta(data)
+        if not data:  # message.sent, status etc.: nada a fazer, sem aviso no log
+            return jsonify({"ok": True})
 
     # Validacao basica: formato da Meta
     if data.get("object") != "whatsapp_business_account":

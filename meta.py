@@ -42,6 +42,17 @@ def _erro(status: int, data) -> str:
     return f"HTTP {status}: {str(data)[:300]}"
 
 
+def _resumo_log(data) -> str:
+    """O que vai para o log: so o id do pedido ou o erro. A resposta da API traz o
+    texto enviado e o telefone inteiro (dado de saude); nada disso pode ir ao log."""
+    if not isinstance(data, dict):
+        return "-"
+    err = data.get("error")
+    if isinstance(err, dict):
+        return f"{err.get('code', '')}: {err.get('message', '')}"[:200]
+    return f"request_id={str(data.get('request_id', ''))[:40]}"
+
+
 def _desembrulha(data):
     """{"data": {..., "meta_response": {...}}} -> a resposta da Meta, como antes."""
     inner = data.get("data") if isinstance(data, dict) else None
@@ -62,7 +73,7 @@ def _request(method, path, body=None, params=None, extra_headers=None):
             data = r.json()
         except Exception:
             data = r.text
-        print(f"[meta] {method} {path[:60]} -> {r.status_code} | {str(data)[:300]}", flush=True)
+        print(f"[meta] {method} {path[:60]} -> {r.status_code} | {_resumo_log(data)}", flush=True)
         if r.ok:
             return {"ok": True, "status": r.status_code, "data": _desembrulha(data)}
         return {"ok": False, "status": r.status_code, "error": _erro(r.status_code, data)}
@@ -203,7 +214,7 @@ def upload_media_bytes(file_bytes: bytes, mime_type: str, filename: str = "file"
             data = r.json()
         except Exception:
             data = r.text
-        print(f"[meta] POST /media upload_bytes -> {r.status_code} | {str(data)[:200]}", flush=True)
+        print(f"[meta] POST /media upload_bytes -> {r.status_code} | {_resumo_log(data)}", flush=True)
         if r.ok:
             return {"ok": True, "status": r.status_code, "data": _desembrulha(data)}
         return {"ok": False, "status": r.status_code, "error": _erro(r.status_code, data)}
