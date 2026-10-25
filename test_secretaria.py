@@ -314,7 +314,8 @@ class Fluxo(unittest.TestCase):
         # A queixa sem o "Me chamo José" junto.
         self.assertEqual(ficha["queixa"], "Minha principal queixa é a posição do meu queixo. "
                                           "Acho que preciso de cirurgia Ortognática")
-        self.assertIn(fp.PERGUNTAS["medico"], saidas[1][2])
+        self.assertEqual(ficha["medico"], "Dr. Fabrício")  # dito na 1a mensagem: não pergunta
+        self.assertIn("pré-cadastro", saidas[1][2])
         self.assertFalse(any(d.usar_llm for _, d, _ in saidas))
 
     def test_cadastro_em_partes_pede_so_o_que_falta(self):
@@ -401,7 +402,16 @@ class Fluxo(unittest.TestCase):
             ficha, saidas = conversa(self.CONVERSA[:2] + ["Preciso tirar o siso", resposta]
                                      + self.CONVERSA[4:])
             self.assertIn(nomes, saidas[-1][2])
-        self.assertIn("🥼 Dr. Tadeu\n📌", clinica.cartao_consulta_agendada("2026-08-02T15:00", preferencia="Dr. Tadeu"))
+        # Preferência dita antes da pergunta: guarda e não pergunta de novo.
+        ficha, saidas = conversa(["Gostaria de agendar uma consulta com o dr Fabricio",
+                                  "Maria", "Preciso tirar o siso"])
+        self.assertEqual(ficha["medico"], "Dr. Fabrício")
+        self.assertNotIn(fp.PERGUNTAS["medico"], " ".join(t for _, _, t in saidas))
+        self.assertIn("pré-cadastro", saidas[-1][2])
+        # "Tadeu" como nome do paciente, ou numa pergunta, não é preferência.
+        for frase in ["Meu nome é Tadeu", "O Dr. Tadeu faz cirurgia de siso?"]:
+            self.assertEqual(conversa([frase])[0]["medico"], "", frase)
+        self.assertIn("🥼 Dr. Tadeu\n📌",clinica.cartao_consulta_agendada("2026-08-02T15:00", preferencia="Dr. Tadeu"))
 
     def test_resumo_vai_numa_mensagem_so(self):
         _, saidas = conversa(self.CONVERSA)

@@ -467,6 +467,25 @@ def _cidade(texto: str) -> str:
     return _titulo(" ".join(palavras))
 
 
+def _medico_citado(t: str, exige_marca: bool = False) -> str:
+    """Médico que o paciente escolheu em `t` (já normalizado); "" se não escolheu.
+
+    exige_marca: leitura passiva - só vale "dr/doutor Tadeu" ou "com o Tadeu",
+    porque "Tadeu" também pode ser o nome do paciente.
+    """
+    if exige_marca:
+        t = re.sub(r"\b(?:dr|dra|doutor|doutora|medico)\.?\s+(fabricio|tadeu)\b", r"@\1", t)
+        t = re.sub(r"\bcom (?:o |a )?(fabricio|tadeu)\b", r"@\1", t)
+        fab, tad = "@fabricio" in t, "@tadeu" in t
+    else:
+        fab, tad = bool(re.search(r"\bfabricio\b", t)), bool(re.search(r"\btadeu\b", t))
+    if fab == tad:
+        return ""
+    # "Não quero o Tadeu" escolhe o outro.
+    recusado = bool(re.search(r"\bnao (?:quero|gosto|prefiro|pode)\b", t))
+    return "Dr. Tadeu" if fab == recusado else "Dr. Fabrício"
+
+
 def extrair_passivo(ficha: dict, texto: str) -> list[str]:
     """Dados que o paciente deu sem ter sido perguntado. Só preenche lacunas."""
     mudou = []
@@ -499,6 +518,15 @@ def extrair_passivo(ficha: dict, texto: str) -> list[str]:
             if m:
                 ficha["exames"] = f"Sim ({m.group(1)})"
                 mudou.append("exames")
+
+    # "Quero consulta com o Dr. Tadeu": a preferência dita antes da pergunta.
+    if not ficha.get("medico"):
+        # Frase com "?" é dúvida ("o Dr. Tadeu faz siso?"), não preferência.
+        afirmacoes = [f for f in re.split(r"(?<=[.!?])\s+|\n", texto or "") if "?" not in f]
+        escolhido = _medico_citado(clinica.normalizar(" ".join(afirmacoes)), exige_marca=True)
+        if escolhido:
+            ficha["medico"] = escolhido
+            mudou.append("medico")
 
     if not ficha.get("avaliacao_previa") and _RX_AVALIACAO_SIM.search(t):
         ficha["avaliacao_previa"] = "Sim"
@@ -595,12 +623,10 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
         return True
 
     if campo == "medico":
-        fab, tad = re.search(r"\bfabricio\b", t), re.search(r"\btadeu\b", t)
-        if bool(fab) != bool(tad):
-            # "Não quero o Tadeu" escolhe o outro.
-            recusado = re.search(r"\bnao (?:quero|gosto|prefiro|pode)\b", t)
-            ficha["medico"] = "Dr. Tadeu" if bool(fab) == bool(recusado) else "Dr. Fabrício"
-        elif (fab and tad) or nao_sabe or clinica.e_nao(bruto) or re.search(
+        escolhido = _medico_citado(t)
+        if escolhido:
+            ficha["medico"] = escolhido
+        elif (re.search(r"\bfabricio\b", t) and re.search(r"\btadeu\b", t)) or nao_sabe or clinica.e_nao(bruto) or re.search(
                 r"\b(?:tanto faz|qualquer|ambos|os dois|sem preferencia|nao tenho|indiferente|nenhum)\b", t):
             ficha["medico"] = "Sem preferência"
         else:
