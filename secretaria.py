@@ -622,11 +622,13 @@ def _retorno(ficha: dict, d: Decisao, texto: str, t: str, consulta: dict, fechar
     return fechar()
 
 
-def montar(d: Decisao, texto_modelo: str = "") -> tuple[str, list[str]]:
+def montar(d: Decisao, texto_modelo: str = "", medico: str | None = None) -> tuple[str, list[str]]:
     """Junta partes travadas + resposta conferida do modelo + pergunta do funil.
 
     Devolve (mensagem, violacoes). Com o modelo fora do ar ou barrado, a
-    dúvida recebe a resposta genérica travada.
+    dúvida recebe a resposta genérica travada. `medico` (preferência do
+    paciente, "" se ainda não escolheu) ajusta o nome do doutor nas frases;
+    None deixa o texto como está.
     """
     violacoes: list[str] = []
     partes = list(d.partes)
@@ -642,6 +644,8 @@ def montar(d: Decisao, texto_modelo: str = "") -> tuple[str, list[str]]:
     vistos, unicas = set(), []
     for p in partes:
         p = (p or "").strip()
+        if medico is not None:
+            p = clinica.com_medico(p, medico)
         if p and p not in vistos:
             vistos.add(p)
             unicas.append(p)

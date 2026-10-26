@@ -3192,10 +3192,36 @@ async function updateAgendamentosBadge() {
     badge.style.display = data.count > 0 ? 'inline-flex' : 'none';
 }
 
+// Manual: a equipe escolhe dia e hora. Auto: a assistente marca sozinha, pelas
+// vagas livres e pela disponibilidade que o paciente escreveu; sem vaga, o
+// pedido cai aqui para a equipe.
+function mostrarAgendaModo(modo) {
+    const caixa = document.getElementById('ag-modo');
+    if (!caixa) return;
+    caixa.classList.toggle('semana', modo === 'auto');
+    document.getElementById('ag-modo-manual').classList.toggle('active', modo !== 'auto');
+    document.getElementById('ag-modo-auto').classList.toggle('active', modo === 'auto');
+    document.getElementById('ag-modo-texto').textContent = modo === 'auto'
+        ? 'Modo Auto: a assistente marca a consulta sozinha na Agenda (e no Google, se conectado). Sem vaga que caiba, o pedido aparece aqui para a equipe.'
+        : 'Modo Manual: a equipe confirma cada horário.';
+}
+
+async function loadAgendaModo() {
+    const cfg = await api('/api/settings/agenda');
+    if (cfg) mostrarAgendaModo(cfg.modo);
+}
+
+async function setAgendaModo(modo) {
+    const r = await api('/api/settings/agenda', { method: 'PUT', body: JSON.stringify({ modo }) });
+    if (r && r.ok) { mostrarAgendaModo(r.modo); toast(`Agendamento ${r.modo === 'auto' ? 'automático' : 'manual'}`, 'success'); }
+    else toast(friendlyError(r?.error || 'Erro ao salvar'), 'error');
+}
+
 async function loadAgendamentosPendentes() {
     const lista = document.getElementById('ag-pendentes');
     if (!lista) return;
     const primeira = !lista.dataset.loaded;
+    if (primeira) loadAgendaModo();
     if (primeira) lista.innerHTML = skeletonRows(3);
     const ags = await api('/api/agendamentos?status=pendente');
     lista.dataset.loaded = '1';

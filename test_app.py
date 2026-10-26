@@ -204,3 +204,34 @@ class TestTokenGoogle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAgendaAuto(unittest.TestCase):
+    VAGAS = [{"data": "2026-10-27", "dia": "Terça", "horarios": ["08:00", "14:00"]}]
+
+    def setUp(self):
+        self.c = cliente()
+        with self.c.session_transaction() as sessao:  # login real estoura o limite de tentativas
+            sessao["logged_in"] = True
+
+    def tearDown(self):
+        app_mod.database.set_setting("agenda_modo", "manual")
+
+    def test_modo_padrao_manual_e_troca_pelo_painel(self):
+        self.assertEqual(self.c.get("/api/settings/agenda").get_json()["modo"], "manual")
+        self.assertTrue(self.c.put("/api/settings/agenda", json={"modo": "auto"}).get_json()["ok"])
+        self.assertEqual(self.c.get("/api/settings/agenda").get_json()["modo"], "auto")
+        self.assertEqual(self.c.put("/api/settings/agenda", json={"modo": "x"}).status_code, 400)
+
+    def test_vaga_automatica_so_no_modo_auto(self):
+        ficha = {"disponibilidade": "terças à tarde"}
+        with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "")):
+            self.assertEqual(app_mod._vaga_automatica(ficha), "")
+            app_mod.database.set_setting("agenda_modo", "auto")
+            self.assertEqual(app_mod._vaga_automatica(ficha), "2026-10-27T14:00")
+            self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "quando der"}), "")
+
+    def test_sem_ver_o_google_a_equipe_decide(self):
+        app_mod.database.set_setting("agenda_modo", "auto")
+        with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "fora do ar")):
+            self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "terças"}), "")

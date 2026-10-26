@@ -46,6 +46,9 @@ pronto-socorro/SAMU (192), e a conversa é transferida.
   paciente. "Abrir conversa" leva ao chat; "Confirmar horário" escolhe data,
   hora e duração (padrão de 1 hora, ajustável), avisa o paciente no WhatsApp
   e manda o horário para a Agenda. Horário ocupado gera alerta de conflito.
+- **Manual / Auto** (seletor no topo): no Auto a assistente marca sozinha a
+  primeira vaga livre (Horários + Agenda + Google) que cabe no que o paciente
+  escreveu ("terças à tarde"); sem vaga, o pedido fica pendente aqui.
 - **Agenda**: calendário (mês e semana) com as avaliações confirmadas; cada
   uma abre o resumo, com opções de remarcar e cancelar, ambas com aviso
   opcional ao paciente.

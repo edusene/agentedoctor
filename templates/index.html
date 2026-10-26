@@ -522,8 +522,15 @@
                         <h1>Confirmação de Agendamento</h1>
                         <p class="muted ag-sub">Pedidos que a assistente encaminhou. Escolha dia e horário: o paciente recebe a confirmação no WhatsApp e o horário vai para a Agenda.</p>
                     </div>
-                    <button class="btn-secondary btn-sm" onclick="loadAgendamentosPendentes()">Atualizar</button>
+                    <div class="agenda-controles">
+                        <div class="agenda-modo" id="ag-modo" title="Manual: a equipe escolhe o horário. Auto: a assistente marca sozinha na Agenda e no Google, pelas vagas livres.">
+                            <button id="ag-modo-manual" class="active" onclick="setAgendaModo('manual')">Manual</button>
+                            <button id="ag-modo-auto" onclick="setAgendaModo('auto')">Auto</button>
+                        </div>
+                        <button class="btn-secondary btn-sm" onclick="loadAgendamentosPendentes()">Atualizar</button>
+                    </div>
                 </div>
+                <p class="muted ag-sub" id="ag-modo-texto"></p>
                 <div id="ag-pendentes" class="ag-lista"></div>
             </div>
 

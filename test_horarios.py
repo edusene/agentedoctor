@@ -87,3 +87,27 @@ class TestConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EscolhaAutomatica(unittest.TestCase):
+    VAGAS = [
+        {"data": "2026-10-27", "dia": "Terça", "horarios": ["08:00", "09:00", "14:00"]},
+        {"data": "2026-10-28", "dia": "Quarta", "horarios": ["08:00", "15:00"]},
+        {"data": "2026-10-30", "dia": "Sexta", "horarios": ["14:00"]},
+    ]
+
+    def test_dia_e_periodo(self):
+        self.assertEqual(horarios.escolher(self.VAGAS, "Terças à tarde"), datetime(2026, 10, 27, 14))
+        self.assertEqual(horarios.escolher(self.VAGAS, "Terças manhã e sextas a tarde"), datetime(2026, 10, 27, 8))
+
+    def test_hora_exata(self):
+        self.assertEqual(horarios.escolher(self.VAGAS, "quarta-feira as 8 horas"), datetime(2026, 10, 28, 8))
+        self.assertEqual(horarios.escolher(self.VAGAS, "quarta às 15h"), datetime(2026, 10, 28, 15))
+
+    def test_qualquer_dia_a_tarde(self):
+        self.assertEqual(horarios.escolher(self.VAGAS, "Qualquer dia a tarde"), datetime(2026, 10, 27, 14))
+
+    def test_sem_vaga_ou_sem_criterio_nao_escolhe(self):
+        self.assertIsNone(horarios.escolher(self.VAGAS, "quintas de manhã"))
+        self.assertIsNone(horarios.escolher(self.VAGAS, "quando der"))
+        self.assertIsNone(horarios.escolher([], "terça"))

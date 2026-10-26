@@ -171,6 +171,7 @@ RESPOSTA_DUVIDA_GENERICA = (
 )
 
 # Seção 18: ... AGENDAMENTO → CONFIRMAÇÃO → ORIENTAÇÕES PRÉ-CONSULTA.
+RESPOSTA_AGENDADA = "Perfeito! Sua avaliação foi agendada."
 RESPOSTA_ENCAMINHADO = (
     "Perfeito! Sua solicitação foi encaminhada à equipe, que vai confirmar o dia "
     "e horário da sua avaliação por aqui."
@@ -188,11 +189,37 @@ def medicos(preferencia: str = "") -> str:
     return preferencia if preferencia in PREFERENCIAS_MEDICO else MEDICOS
 
 
+_RX_DR_FABRICIO = re.compile(r"(?i)\bDr\.? Fabr[ií]cio(?: Guimar[ãa]es)?")
+_RX_ARTIGO_ANTES = re.compile(r"(?i)\b(?:com |pelo |pel[ao] |do |ao |o )$")
+
+
+def com_medico(texto: str, preferencia: str | None) -> str:
+    """Nome do médico na frase conforme a escolha do paciente.
+
+    As frases travadas falam do Dr. Fabrício; antes de o paciente escolher (ou
+    sem preferência) elas dizem "o doutor", e com o Dr. Tadeu escolhido, Tadeu.
+    Texto que já cita o Dr. Tadeu (pergunta de preferência, cartões) fica como está.
+    """
+    if preferencia == "Dr. Fabrício" or "Tadeu" in texto:
+        return texto
+    novo = preferencia if preferencia == "Dr. Tadeu" else ""
+
+    def troca(m: re.Match) -> str:
+        if novo:
+            return novo
+        # "equipe do Dr. Fabrício" -> "equipe do doutor"; "O Dr. Fabrício esclarece" -> "O doutor esclarece"
+        antes = m.string[:m.start()]
+        return "doutor" if _RX_ARTIGO_ANTES.search(antes) else "o doutor"
+
+    return _RX_DR_FABRICIO.sub(troca, texto)
+
+
 LOCAL_CONSULTA = "Clínica Omnilux / Av. Lauro Sodré, 2800, Bairro Costa e Silva - Porto Velho - RO"
 
 # R$ 400: ATM, apneia, ortognática e estéticas. R$ 300: siso, enxerto,
-# lesões e biópsias. O resto (trauma, dor de dente, implante, sem área): o
-# doutor não definiu, e o agente não chuta - a equipe confirma.
+# lesões e biópsias. O resto (trauma, dor de dente, implante, sem área) recebe
+# VALOR_PADRAO: o doutor pediu (26/10) que o valor sempre seja informado.
+VALOR_PADRAO = 300
 _VALOR_POR_AREA = {
     "ortognatica": 400, "mentoplastia": 400, "lift_facial": 400, "lift_cervical": 400,
     "papada": 400,
@@ -202,14 +229,8 @@ _RX_VALOR_400 = re.compile(
     r"\b(atm|articulacao temporo ?mandibular|temporomandibular|apneia|ronco|ronc\w+"
     r"|estalo\w* (na|da) (mandibula|boca)|mandibula (estala|trava|travando))\b")
 
-RESPOSTA_VALOR_A_CONFIRMAR = (
-    "O valor da consulta depende do motivo do atendimento. A equipe confirma o valor "
-    "junto com o dia e horário da sua avaliação."
-)
-
-
 def valor_da_consulta(area: str, queixa: str = "") -> int | None:
-    """Valor da consulta pelo roteiro do doutor; None = a equipe confirma."""
+    """Valor da consulta pelo roteiro do doutor; None = fora da tabela."""
     if _RX_VALOR_400.search(normalizar(queixa)):
         return 400
     return _VALOR_POR_AREA.get(area or "")
@@ -230,14 +251,13 @@ TABELA_VALORES = (
     "•  R$ 400: ATM (articulação da mandíbula), apneia/ronco, cirurgia ortognática e "
     "procedimentos estéticos da face (queixo, papada, lifting)\n"
     "•  R$ 300: extração de dentes e siso, enxerto ósseo, cistos/lesões e biópsias\n"
-    "Para outros motivos, a equipe confirma o valor junto com o dia e horário da avaliação."
+    f"•  R$ {VALOR_PADRAO}: demais motivos"
 )
 
 
 def resposta_valor(area: str, queixa: str = "", preferencia: str = "") -> str:
     """Cartao do fim do atendimento: confirma o valor com o paciente."""
-    valor = valor_da_consulta(area, queixa)
-    return cartao_valor(valor, preferencia) if valor else RESPOSTA_VALOR_A_CONFIRMAR
+    return cartao_valor(valor_da_consulta(area, queixa) or VALOR_PADRAO, preferencia)
 
 
 def resposta_pergunta_valor(area: str, queixa: str = "") -> str:

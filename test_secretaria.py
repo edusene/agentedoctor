@@ -592,11 +592,10 @@ class Fluxo(unittest.TestCase):
         self.assertIn(clinica.RESPOSTA_ENCAMINHADO, saidas[-1][2])
         self.assertIn(clinica.cartao_valor(300), saidas[-1][2])
 
-    def test_sem_valor_definido_o_encaminhamento_avisa_que_a_equipe_confirma(self):
+    def test_sem_valor_na_tabela_o_encaminhamento_traz_o_valor_padrao(self):
         _, saidas = conversa(["Oi", "Ana", "dor no dente", "Tanto faz", CADASTRO_OK, "terças à tarde",
                               "não", "sim"])
-        self.assertIn(clinica.RESPOSTA_VALOR_A_CONFIRMAR, saidas[-1][2])
-        self.assertNotIn("R$", saidas[-1][2])
+        self.assertIn(clinica.cartao_valor(clinica.VALOR_PADRAO, "Sem preferência"), saidas[-1][2])
 
     def test_pergunta_se_e_robo_tem_resposta_verdadeira(self):
         for pergunta in ["Você é um robô?", "estou falando com uma pessoa de verdade?",
@@ -953,3 +952,52 @@ class RetornoComConsulta(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NomeDoMedicoNasFrases(unittest.TestCase):
+    """Doutor, 26/10: antes de escolher, as frases não citam o Dr. Fabrício."""
+
+    def test_sem_escolha_diz_o_doutor(self):
+        t = clinica.com_medico("Seu pedido está com a equipe do Dr. Fabrício. O Dr. Fabrício esclarece.", "")
+        self.assertNotIn("Fabrício", t)
+        self.assertIn("equipe do doutor", t)
+        self.assertIn("O doutor esclarece", t)
+
+    def test_tadeu_escolhido_troca_o_nome(self):
+        self.assertEqual(clinica.com_medico("equipe do Dr. Fabrício", "Dr. Tadeu"), "equipe do Dr. Tadeu")
+
+    def test_fabricio_escolhido_e_pergunta_de_preferencia_ficam(self):
+        self.assertEqual(clinica.com_medico("equipe do Dr. Fabrício", "Dr. Fabrício"), "equipe do Dr. Fabrício")
+        self.assertIn("Dr. Fabrício", clinica.com_medico(fp.PERGUNTAS["medico"], ""))
+
+    def test_montar_aplica_por_parte(self):
+        d = secretaria.Decisao(partes=["A equipe do Dr. Fabrício responde.", fp.PERGUNTAS["medico"]])
+        texto, _ = secretaria.montar(d, "", "")
+        self.assertIn("equipe do doutor", texto)
+        self.assertIn("com o Dr. Fabrício ou com o Dr. Tadeu", texto)
+
+
+class NomeAntesDoPedido(unittest.TestCase):
+    def test_nome_e_pedido_na_mesma_frase(self):
+        for frase in ("Izabela e quero marcar uma consulta", "Daniele, gostaria de agendar uma consulta",
+                      "Kalison. Quero marcar uma consulta"):
+            self.assertTrue(fp.extrair_nome(frase), frase)
+        self.assertEqual(fp.extrair_nome("Izabela e quero marcar uma consulta"), "Izabela")
+        self.assertEqual(fp.extrair_nome("Oi, quero marcar uma consulta"), "")
+
+
+class CadastroColadoDoModelo(unittest.TestCase):
+    """Conversa do Kalison (26/10): modelo colado com •, sem dois-pontos, e começando por 'Obrigada!'."""
+
+    def test_modelo_com_marcadores_e_agradecimento_no_inicio(self):
+        f = fp.nova("5562999999999")
+        f.update(nome="Kalison", queixa="Apneia do sono", medico="Dr. Fabrício", ultima_pergunta="nome_completo")
+        _, saidas = conversa([
+            "• Nome completo Kalison Cândido\n• Data de nascimento 16/09/1975\n• CPF 021.312.894-21\n"
+            "• RG 4330827\n• E-mail kalisoncandido@gmail.com\n• Endereço com CEP: 69.044-770",
+            "Obrigada! Para completar o seu cadastro, ainda preciso de:\n"
+            "• Endereço com CEP. Rua 31 casa 04. Residencial Versalles Gold. Bairro Planalto. Manaus AM. CEP 69.044-770",
+        ], f)
+        self.assertEqual(f["nome_completo"], "Kalison Cândido")
+        self.assertTrue(f["endereco"].startswith("Rua 31"))
+        self.assertIn("dias e horários", saidas[-1][2])

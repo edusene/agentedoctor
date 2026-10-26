@@ -900,7 +900,7 @@ def _texto_do_lote(items: list[dict]) -> str:
     return "\n".join(p for p in partes if p.strip()).strip()
 
 
-def _registrar_encaminhamento(user: str, ficha: dict) -> None:
+def _registrar_encaminhamento(user: str, ficha: dict, inicio_auto: str = "") -> None:
     """Paciente confirmou o resumo: vira agendamento PENDENTE no painel.
 
     A equipe ve o pedido na aba Confirmação de Agendamento, escolhe dia e hora
@@ -922,12 +922,22 @@ def _registrar_encaminhamento(user: str, ficha: dict) -> None:
         if prioridade:
             nome = f"{nome} (PRIORIDADE - trauma)"
         ag = database.criar_agendamento(contact["id"], conv["id"], user, nome, resumo, ficha)
+        situacao = "pendente"
+        if inicio_auto and ag:
+            database.atualizar_agendamento(
+                ag["id"], inicio=inicio_auto, duracao_min=_duracao_padrao(), status="confirmado",
+                confirmado_em=database.agora_utc(),
+                observacoes="Agendado automaticamente pela assistente (modo Auto).")
+            _sincronizar_google(database.obter_agendamento(ag["id"]))
+            situacao = "confirmado"
+        andamento = (f"agendado automaticamente para {inicio_auto.replace('T', ' ')}"
+                     if situacao == "confirmado" else "aguardando confirmacao na aba Agendamentos")
         database.save_message(
             conversation_id=conv["id"], phone=user, direction="internal",
-            body=f"{titulo} - aguardando confirmacao na aba Agendamentos\n\n{resumo}",
+            body=f"{titulo} - {andamento}\n\n{resumo}",
             sender="system", msg_type="system",
         )
-        events.emit("agendamento_atualizado", {"id": ag["id"] if ag else None, "status": "pendente"})
+        events.emit("agendamento_atualizado", {"id": ag["id"] if ag else None, "status": situacao})
     except Exception as e:
         print(f"[agendamento] ERRO ao registrar pedido de {clinica.mascarar_fone(user)}: {e}")
     perform_transfer(user, reason=titulo, send_message=False)
@@ -1043,7 +1053,15 @@ def handle_flush(user: str, items: list[dict]) -> None:
                 # travada generica e o funil segue - nunca silencio.
                 print(f"[flush] ERRO llm p/ {clinica.mascarar_fone(user)}: {e}")
 
-        mensagem, violacoes = secretaria.montar(decisao, texto_modelo)
+        mensagem, violacoes = secretaria.montar(decisao, texto_modelo, ficha.get("medico", ""))
+        # Modo auto: o cartao da consulta marcada toma o lugar do "encaminhada
+        # a equipe"; o do valor e as orientacoes seguem.
+        inicio_auto = _vaga_automatica(ficha) if decisao.encaminhar else ""
+        if inicio_auto:
+            mensagem = mensagem.replace(
+                clinica.RESPOSTA_ENCAMINHADO,
+                clinica.RESPOSTA_AGENDADA + "\n\n" + clinica.cartao_consulta_agendada(
+                    inicio_auto, preferencia=ficha.get("medico", "")))
         if violacoes:
             print(f"[trava] user={clinica.mascarar_fone(user)} resposta do modelo BARRADA {violacoes} "
                   f"(resposta com {len(texto_modelo)} chars)")
@@ -1083,7 +1101,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if decisao.transferir:
             perform_transfer(user, reason=decisao.transferir, send_message=False)
         elif decisao.encaminhar:
-            _registrar_encaminhamento(user, ficha)
+            _registrar_encaminhamento(user, ficha, inicio_auto)
 
         # Transferida, a conversa fica NAO LIDA para a equipe: e o que acende
         # o badge da Fila Humana. Zerar aqui apagava o aviso da transferencia.
@@ -1196,7 +1214,7 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> str | None:
                                              "transferred": False})
         print(f"[fila] user={clinica.mascarar_fone(user)} {motivo} (parada {parada_h:.1f} h, "
               f"consulta={consulta.get('situacao', '-')}): agente retomou")
-        return "" if (ultima_acao or consulta) else MENSAGEM_RETOMADA
+        return "" if (ultima_acao or consulta) else clinica.com_medico(MENSAGEM_RETOMADA, ficha.get("medico", ""))
 
     if _so_confirmacao(items):
         # "ok" logo depois de "sua solicitacao foi encaminhada" (teste de
@@ -1207,7 +1225,7 @@ def _fila_humana(user: str, items: list[dict], chegada: float) -> str | None:
         ficha["aviso_fila_para"] = transferido
         ficha_paciente.save(user, ficha, estrito=True)
         print(f"[fila] user={clinica.mascarar_fone(user)} aguardando a equipe: aviso enviado")
-        _responder_direto(user, items, MENSAGEM_FILA, chegada)
+        _responder_direto(user, items, clinica.com_medico(MENSAGEM_FILA, ficha.get("medico", "")), chegada)
     else:
         print(f"[flush] user={clinica.mascarar_fone(user)} modo=humano, aviso ja enviado; aguardando a equipe")
     return None
@@ -2718,6 +2736,11 @@ _DIAS_SEMANA = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
 _DURACAO_PADRAO = 60
 
 
+def _modo_agenda() -> str:
+    """"manual" (a equipe confirma o horário) ou "auto" (a assistente marca sozinha)."""
+    return "auto" if database.get_setting("agenda_modo", "manual") == "auto" else "manual"
+
+
 def _duracao_padrao() -> int:
     try:
         return int(database.get_setting("agenda_duracao_padrao", str(_DURACAO_PADRAO)))
@@ -2927,26 +2950,34 @@ def api_get_agenda_settings():
         database.set_setting("google_base_url", base)
     if google_agenda.conectado():
         _garantir_vigia()
-    return jsonify({"duracao_padrao": _duracao_padrao(), "google": google_agenda.status()})
+    return jsonify({"duracao_padrao": _duracao_padrao(), "modo": _modo_agenda(),
+                    "google": google_agenda.status()})
 
 
 @app.put("/api/settings/agenda")
 @login_required
 def api_set_agenda_settings():
     data = request.get_json(silent=True) or {}
+    if "modo" in data:
+        if data["modo"] not in ("manual", "auto"):
+            return jsonify({"error": "Modo inválido"}), 400
+        database.set_setting("agenda_modo", data["modo"])
+    if "duracao_padrao" not in data:
+        return jsonify({"ok": True, "modo": _modo_agenda(), "duracao_padrao": _duracao_padrao()})
     try:
-        duracao = int(data.get("duracao_padrao", _DURACAO_PADRAO))
+        duracao = int(data["duracao_padrao"])
     except (TypeError, ValueError):
         return jsonify({"error": "Duração inválida"}), 400
     if not 10 <= duracao <= 480:
         return jsonify({"error": "A duração deve ficar entre 10 minutos e 8 horas"}), 400
     database.set_setting("agenda_duracao_padrao", str(duracao))
-    return jsonify({"ok": True, "duracao_padrao": duracao})
+    return jsonify({"ok": True, "duracao_padrao": duracao, "modo": _modo_agenda()})
 
 
 # ── Horários de atendimento e vagas livres ───────────────────────────────────
-# Só consulta por enquanto: o agente segue encaminhando o pedido para a equipe
-# confirmar. horarios_livres() fica pronto para quando ele agendar sozinho.
+# Modo manual: o agente encaminha o pedido e a equipe confirma. Modo auto
+# (aba Agendamentos): _vaga_automatica() escolhe a vaga pela disponibilidade
+# do paciente e o agendamento já nasce confirmado.
 
 def _config_horarios() -> dict:
     return horarios.carregar(database.get_setting("agenda_horarios", ""))
@@ -2984,6 +3015,21 @@ def horarios_livres(de: str = "", ate: str = "") -> tuple[list[dict], str]:
         return [], "Período inválido."
     ocupados, erro = _ocupados(d_de.isoformat(), d_ate.isoformat())
     return horarios.vagas(cfg, d_de, d_ate, ocupados, _duracao_padrao(), agora), erro
+
+
+def _vaga_automatica(ficha: dict) -> str:
+    """Modo auto: início ISO da vaga que cabe na disponibilidade do paciente, ou "" (a equipe decide)."""
+    if _modo_agenda() != "auto":
+        return ""
+    try:
+        vagas, erro = horarios_livres()
+        if erro:  # sem ver o Google nao se marca: a equipe confirma
+            return ""
+        escolhida = horarios.escolher(vagas, str(ficha.get("disponibilidade") or ""))
+    except Exception as e:
+        print(f"[auto] WARN nao consegui escolher vaga: {e}")
+        return ""
+    return escolhida.strftime("%Y-%m-%dT%H:%M") if escolhida else ""
 
 
 @app.get("/api/settings/horarios")

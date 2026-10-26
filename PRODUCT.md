@@ -16,11 +16,11 @@ O consultório de cirurgia bucomaxilofacial recebe pacientes pelo WhatsApp. A se
 2. **Dúvida aberta**: resposta travada em código quando existe; senão, modelo + RAG, com a saída conferida por `clinica.conferir_resposta()`.
 3. **Emergência**: sinais de urgência recebem a orientação de pronto-socorro/SAMU (192) e a conversa vai para a equipe.
 4. **Fila humana**: pedido de atendente, remarcar ou cancelar transfere para a equipe; o agente fica calado enquanto a equipe atende.
-5. **Agendamento**: pedido confirmado pelo paciente vira pendente em Agendamentos; a equipe confirma o horário, o paciente é avisado e o evento vai para a Agenda (e para o Google Calendar, se conectado).
+5. **Agendamento**: pedido confirmado pelo paciente vira pendente em Agendamentos; a equipe confirma o horário, o paciente é avisado e o evento vai para a Agenda (e para o Google Calendar, se conectado). Na aba Agendamentos há o seletor **Manual/Auto** (pedido do doutor, 26/10): no Auto a assistente escolhe a primeira vaga livre que cabe na disponibilidade do paciente, marca na Agenda/Google e envia o cartão da consulta; sem vaga que caiba (ou Google fora do ar), o pedido fica pendente para a equipe.
 
 ## Regras de negócio e de segurança
 
-- O agente **nunca** fecha diagnóstico, indica procedimento, interpreta exame, promete resultado, prescreve nem inventa informação. Preço só nos casos definidos pelo doutor (`TABELA_VALORES`); fora deles, "a equipe confirma".
+- O agente **nunca** fecha diagnóstico, indica procedimento, interpreta exame, promete resultado, prescreve nem inventa informação. O valor da consulta é sempre informado no fim (pedido do doutor, 26/10): a tabela dele (`TABELA_VALORES`) e, fora dela, `VALOR_PADRAO` (R$ 300). Antes de o paciente escolher o médico, as frases dizem "o doutor" (`clinica.com_medico`).
 - Respostas que não podem oscilar ficam **travadas em código**, não no modelo.
 - Foto e documento do paciente **não vão ao modelo**.
 - Dado de paciente é dado de saúde (LGPD): nenhum dado real em teste, log, commit ou grafo. O repositório é **público**.

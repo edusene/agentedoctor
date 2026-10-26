@@ -7,8 +7,8 @@ dias bloqueados (feriado, congresso). vagas() cruza isso com o que já está
 ocupado (agendamentos confirmados e eventos do Google) e devolve os horários
 que ainda cabem uma avaliação.
 
-Hoje é só consulta: o agente continua encaminhando o pedido para a equipe
-confirmar. Fica pronto para o dia em que o agente agendar sozinho.
+No modo Auto do painel, escolher() devolve a vaga que cabe na disponibilidade
+do paciente e o agente agenda sozinho; no Manual a equipe confirma.
 
 Sem Flask, banco ou rede: as funções recebem tudo e são testáveis puras.
 """
@@ -16,6 +16,8 @@ Sem Flask, banco ou rede: as funções recebem tudo e são testáveis puras.
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from datetime import date, datetime, timedelta
 
 DIAS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
@@ -147,3 +149,50 @@ def livre(cfg: dict, inicio: datetime, ocupados: list[tuple[datetime, datetime]]
     for v in vagas(cfg, dia, dia + timedelta(days=1), ocupados, duracao_min, agora):
         return inicio.strftime("%H:%M") in v["horarios"]
     return False
+
+
+# ── Escolha automática (modo Auto) ───────────────────────────────────────────
+# "Terças manhã e sextas à tarde", "quarta-feira às 8 horas", "qualquer dia à
+# tarde": a disponibilidade que o paciente escreveu vira filtro das vagas.
+_DIA_DA_SEMANA = (r"seg\w*", r"ter[cç]\w*", r"qua[rt]\w*", r"qui[nm]\w*", r"sex\w*", r"s[aá]b\w*", r"dom\w*")
+_RX_HORA = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(?:h|hs|horas?)\b|\b(\d{1,2}):(\d{2})\b", re.I)
+
+
+def _sem_acento(t: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", t.lower()) if unicodedata.category(c) != "Mn")
+
+
+def _filtros(texto: str) -> list[tuple[set, str, str]]:
+    """[(dias da semana, periodo, 'HH:MM')] um por trecho; vazio = sem restrição."""
+    saida = []
+    for trecho in re.split(r"[;,\n]| e (?=\w)", _sem_acento(texto)):
+        dias = {i for i, rx in enumerate(_DIA_DA_SEMANA) if re.search(rf"\b{rx}", trecho)}
+        if re.search(r"\bsegunda a sexta\b|\bdias? uteis\b|\bqualquer dia\b|\btodos os dias\b", trecho):
+            dias = set()
+        periodo = next((p for p, rx in (("manha", r"\bmanha\b|\bcedo\b"), ("tarde", r"\btarde\b"),
+                                        ("noite", r"\bnoite\b")) if re.search(rx, trecho)), "")
+        m = _RX_HORA.search(trecho)
+        hora = f"{int(m.group(1) or m.group(3)):02d}:{m.group(2) or m.group(4) or '00'}" if m else ""
+        if dias or periodo or hora:
+            saida.append((dias, periodo, hora))
+    return saida
+
+
+def escolher(vagas_livres: list[dict], disponibilidade: str) -> datetime | None:
+    """Primeira vaga que cabe no que o paciente disse; None se nenhuma cabe.
+
+    Sem dia nem período reconhecível ("quando der") não se escolhe: a equipe decide.
+    """
+    filtros = _filtros(disponibilidade)
+    if not filtros:
+        return None
+    for v in vagas_livres:
+        dia = date.fromisoformat(v["data"])
+        for h in v["horarios"]:
+            hh = int(h[:2])
+            periodo = "manha" if hh < 12 else "tarde" if hh < 18 else "noite"
+            for dias, per, hora in filtros:
+                if ((not dias or dia.weekday() in dias) and (not per or per == periodo)
+                        and (not hora or hora == h)):
+                    return datetime.combine(dia, datetime.strptime(h, "%H:%M").time())
+    return None

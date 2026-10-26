@@ -405,9 +405,21 @@ def _limpar_nome(bruto: str) -> str:
     return _titulo(" ".join(palavras[:4]))
 
 
+# "Izabela e quero marcar uma consulta", "Daniele, gostaria de agendar": o
+# nome vem sozinho antes do pedido.
+_RX_NOME_ANTES_DO_PEDIDO = re.compile(
+    rf"(?i)^\s*([{_LETRAS}]+(?:\s+[{_LETRAS}]+){{0,2}})\s*(?:[,.;!:-]|\se)\s+"
+    r"(?:quero|queria|gostaria|preciso|vim|venho|desejo|estou querendo|to querendo|tenho interesse)")
+
+
 def extrair_nome(texto: str) -> str:
     m = _RX_NOME.search(texto or "")
-    return _limpar_nome(m.group(1)) if m else ""
+    if m:
+        return _limpar_nome(m.group(1))
+    m = _RX_NOME_ANTES_DO_PEDIDO.match(texto or "")
+    if m and clinica.normalizar(m.group(1)) not in _NAO_E_NOME:
+        return nome_de_resposta_direta(m.group(1))
+    return ""
 
 
 _RX_CUMPRIMENTO_NO_FIM = re.compile(
@@ -576,7 +588,7 @@ def extrair_passivo(ficha: dict, texto: str) -> list[str]:
 # Mensagens que nao respondem nada: risada, agradecimento, "ok", cumprimento,
 # so emoji. Eram gravadas como resposta ("kkkk" virava o exame do paciente).
 _RX_SEM_CONTEUDO = re.compile(
-    r"^(?:k+|(?:ha)+h?|(?:he)+|(?:rs)+|obrigad[oa](?: .*)?|valeu|vlw|ok|okay|beleza|blz|show|top|legal"
+    r"^(?:k+|(?:ha)+h?|(?:he)+|(?:rs)+|obrigad[oa](?: w+){0,3}|valeu|vlw|ok|okay|beleza|blz|show|top|legal"
     r"|bom dia|boa tarde|boa noite|oi+|ola|opa|hum+|ah+|eita|tudo bem|tudo bom|perfeito)$")
 
 # "e pra minha filha": o atendimento e de outra pessoa, nao e a queixa.
@@ -1001,7 +1013,7 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
             if not _so_modelo(achado):
                 achados["endereco"] = achado
             resto = resto[:m.start()]
-    pedacos = [p.strip(" .;-") for p in re.split(r"[\n,;]+", resto) if p.strip(" .;-")]
+    pedacos = [p.strip(" .;-•*·–") for p in re.split(r"[\n,;]+", resto) if p.strip(" .;-•*·–")]
     if "nome_completo" not in achados:
         for p in pedacos:
             if _eh_nome_completo(p):

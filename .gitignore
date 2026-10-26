@@ -52,3 +52,6 @@ Corre*Solicitadas/
 
 # Grafo do Graphify (gerado; regenere com o comando de docs/setup.md)
 graphify-out/
+
+# conversas de teste (dados reais de pacientes)
+ConversasTestes/
