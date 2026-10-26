@@ -15,6 +15,7 @@ Sem Flask, banco ou rede: as funções recebem tudo e são testáveis puras.
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 import unicodedata
@@ -154,27 +155,64 @@ def livre(cfg: dict, inicio: datetime, ocupados: list[tuple[datetime, datetime]]
 # ── Escolha automática (modo Auto) ───────────────────────────────────────────
 # "Terças manhã e sextas à tarde", "quarta-feira às 8 horas", "qualquer dia à
 # tarde": a disponibilidade que o paciente escreveu vira filtro das vagas.
-_DIA_DA_SEMANA = (r"seg\w*", r"ter[cç]\w*", r"qua[rt]\w*", r"qui[nm]\w*", r"sex\w*", r"s[aá]b\w*", r"dom\w*")
-_RX_HORA = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(?:h|hs|horas?)\b|\b(\d{1,2}):(\d{2})\b", re.I)
+_NOMES_DIAS = ("segunda", "terca", "quarta", "quinta", "sexta", "sabado", "domingo")
+_RX_HORA = re.compile(
+    r"(?:\b(?:as|a partir das|depois das|apos as|apos)\s+)?\b(\d{1,2})(?::(\d{2}))?(?:\s*(?:h|hs|hrs|horas?))?\b"
+    r"(?:\s+da\s+(manha|tarde|noite))?")
+# Dia relativo ou data solta: o código não sabe resolver, a equipe decide.
+_RX_RELATIVO = re.compile(r"\b(amanha|hoje|depois de amanha|semana que vem|proxim\w+|mes que vem|dia \d+)\b")
 
 
 def _sem_acento(t: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", t.lower()) if unicodedata.category(c) != "Mn")
 
 
-def _filtros(texto: str) -> list[tuple[set, str, str]]:
-    """[(dias da semana, periodo, 'HH:MM')] um por trecho; vazio = sem restrição."""
+def _dias_do_trecho(trecho: str) -> set:
+    achados = set()
+    for palavra in re.findall(r"[a-z]+", trecho):
+        if len(palavra) < 3:
+            continue
+        for i, nome in enumerate(_NOMES_DIAS):
+            # "ter", "qua", "sex" (abreviado) ou o nome com até um erro de digitação
+            if (palavra in ("seg", "ter", "qua", "qui", "sex", "sab", "dom") and nome.startswith(palavra)
+                    or difflib.SequenceMatcher(None, palavra.rstrip("s"), nome).ratio() >= 0.8
+                    or (len(palavra) > 4 and palavra.rstrip("s").removesuffix("feira").rstrip("-") == nome)):
+                achados.add(i)
+    return achados
+
+
+def _filtros(texto: str) -> list[tuple[set, str, str, bool]]:
+    """[(dias da semana, periodo, 'HH:MM', 'a partir de')] um por trecho; vazio = sem restrição.
+
+    None-like: texto com dia relativo ("amanhã") ou número que não é horário.
+    """
+    texto = _sem_acento(texto)
+    if _RX_RELATIVO.search(texto):
+        return []
     saida = []
-    for trecho in re.split(r"[;,\n]| e (?=\w)", _sem_acento(texto)):
-        dias = {i for i, rx in enumerate(_DIA_DA_SEMANA) if re.search(rf"\b{rx}", trecho)}
+    for trecho in re.split(r"[;,\n]| e (?=\w)", texto):
+        dias = _dias_do_trecho(trecho)
         if re.search(r"\bsegunda a sexta\b|\bdias? uteis\b|\bqualquer dia\b|\btodos os dias\b", trecho):
             dias = set()
         periodo = next((p for p, rx in (("manha", r"\bmanha\b|\bcedo\b"), ("tarde", r"\btarde\b"),
                                         ("noite", r"\bnoite\b")) if re.search(rx, trecho)), "")
+        hora, a_partir = "", False
         m = _RX_HORA.search(trecho)
-        hora = f"{int(m.group(1) or m.group(3)):02d}:{m.group(2) or m.group(4) or '00'}" if m else ""
+        if m:
+            h, mi = int(m.group(1)), m.group(2) or "00"
+            if h > 23:
+                return []
+            if m.group(3) == "tarde" and h < 12:
+                h += 12
+            hora = f"{h:02d}:{mi}"
+            a_partir = bool(re.search(r"a partir das|depois das|apos", trecho))
         if dias or periodo or hora:
-            saida.append((dias, periodo, hora))
+            saida.append((dias, periodo, hora, a_partir))
+    # "terça e quinta à tarde": o período do último trecho vale para os dias soltos antes dele.
+    for i in range(len(saida) - 2, -1, -1):
+        dias, periodo, hora, a_partir = saida[i]
+        if dias and not periodo and not hora and saida[i + 1][1]:
+            saida[i] = (dias, saida[i + 1][1], hora, a_partir)
     return saida
 
 
@@ -191,8 +229,8 @@ def escolher(vagas_livres: list[dict], disponibilidade: str) -> datetime | None:
         for h in v["horarios"]:
             hh = int(h[:2])
             periodo = "manha" if hh < 12 else "tarde" if hh < 18 else "noite"
-            for dias, per, hora in filtros:
+            for dias, per, hora, a_partir in filtros:
                 if ((not dias or dia.weekday() in dias) and (not per or per == periodo)
-                        and (not hora or hora == h)):
+                        and (not hora or (h >= hora if a_partir else hora == h))):
                     return datetime.combine(dia, datetime.strptime(h, "%H:%M").time())
     return None

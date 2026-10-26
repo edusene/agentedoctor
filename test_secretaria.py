@@ -1001,3 +1001,16 @@ class CadastroColadoDoModelo(unittest.TestCase):
         self.assertEqual(f["nome_completo"], "Kalison Cândido")
         self.assertTrue(f["endereco"].startswith("Rua 31"))
         self.assertIn("dias e horários", saidas[-1][2])
+
+
+class VariacoesDeEscrita(unittest.TestCase):
+    def test_nome_sem_separador_e_data_impossivel(self):
+        self.assertEqual(fp.extrair_nome("Joao Pedro quero marcar consulta"), "Joao Pedro")
+        self.assertNotIn("nascimento", fp.extrair_cadastro("nascimento 31/02/1990"))
+
+    def test_medico_com_erro_de_digitacao(self):
+        for texto, esperado in (("fabrisio", "Dr. Fabrício"), ("tadeo", "Dr. Tadeu"),
+                                ("não quero o Tadeu", "Dr. Fabrício"), ("tanto faz", "Sem preferência")):
+            f = {}
+            fp.capturar_resposta(f, "medico", texto)
+            self.assertEqual(f["medico"], esperado, texto)

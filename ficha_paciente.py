@@ -408,7 +408,7 @@ def _limpar_nome(bruto: str) -> str:
 # "Izabela e quero marcar uma consulta", "Daniele, gostaria de agendar": o
 # nome vem sozinho antes do pedido.
 _RX_NOME_ANTES_DO_PEDIDO = re.compile(
-    rf"(?i)^\s*([{_LETRAS}]+(?:\s+[{_LETRAS}]+){{0,2}})\s*(?:[,.;!:-]|\se)\s+"
+    rf"(?i)^\s*([{_LETRAS}]+(?:\s+[{_LETRAS}]+){{0,2}})\s*(?:[,.;!:-]|\se)?\s+"
     r"(?:quero|queria|gostaria|preciso|vim|venho|desejo|estou querendo|to querendo|tenho interesse)")
 
 
@@ -907,7 +907,11 @@ def _data(m: re.Match) -> str:
     dia, mes, ano = m.group(1), m.group(2), m.group(3)
     if len(ano) == 2:
         ano = ("19" if int(ano) > 30 else "20") + ano
-    if not (1 <= int(dia) <= 31 and 1 <= int(mes) <= 12 and 1900 <= int(ano) <= 2100):
+    try:
+        datetime(int(ano), int(mes), int(dia))
+    except ValueError:
+        return ""
+    if not 1900 <= int(ano) <= 2100:
         return ""
     return f"{int(dia):02d}/{int(mes):02d}/{ano}"
 

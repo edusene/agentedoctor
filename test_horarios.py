@@ -93,7 +93,7 @@ class EscolhaAutomatica(unittest.TestCase):
     VAGAS = [
         {"data": "2026-10-27", "dia": "Terça", "horarios": ["08:00", "09:00", "14:00"]},
         {"data": "2026-10-28", "dia": "Quarta", "horarios": ["08:00", "15:00"]},
-        {"data": "2026-10-30", "dia": "Sexta", "horarios": ["14:00"]},
+        {"data": "2026-10-30", "dia": "Sexta", "horarios": ["14:00", "16:00"]},
     ]
 
     def test_dia_e_periodo(self):
@@ -111,3 +111,18 @@ class EscolhaAutomatica(unittest.TestCase):
         self.assertIsNone(horarios.escolher(self.VAGAS, "quintas de manhã"))
         self.assertIsNone(horarios.escolher(self.VAGAS, "quando der"))
         self.assertIsNone(horarios.escolher([], "terça"))
+
+    def test_variacoes(self):
+        casos = {
+            "ter e qui a tarde": datetime(2026, 10, 27, 14),
+            "sexta às 16": datetime(2026, 10, 30, 16),
+            "sexta depois das 15": datetime(2026, 10, 30, 16),
+            "sexta-feira 16hrs": datetime(2026, 10, 30, 16),
+            "quarta as 3 da tarde": datetime(2026, 10, 28, 15),
+            "TERÇAS A TARDE": datetime(2026, 10, 27, 14),
+            "terssa de manhã": datetime(2026, 10, 27, 8),
+            "amanhã de manhã": None,
+            "dia 30": None,
+        }
+        for texto, esperado in casos.items():
+            self.assertEqual(horarios.escolher(self.VAGAS, texto), esperado, texto)
