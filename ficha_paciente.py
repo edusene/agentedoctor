@@ -582,6 +582,12 @@ def extrair_passivo(ficha: dict, texto: str) -> list[str]:
             ficha["queixa"] = limpar_queixa(texto)[:300]
             mudou.append("queixa")
 
+    # ATM e apneia/ronco nao sao "area" da triagem, mas sao queixa (R$ 400): "dor na atm" nao se pergunta de novo.
+    if (not ficha.get("queixa") and not educativa and not areas
+            and clinica.valor_da_consulta("", texto) == 400):
+        ficha["queixa"] = limpar_queixa(texto)[:300]
+        mudou.append("queixa")
+
     intencao = clinica.intencao_maior(ficha.get("intencao", "curiosidade"),
                                       clinica.classificar_intencao(texto))
     if intencao != ficha.get("intencao"):
@@ -932,6 +938,17 @@ def _eh_nome_completo(trecho: str) -> bool:
             and not _RX_ENDERECO.search(trecho) and not clinica.classificar_areas(trecho))
 
 
+_RX_VIRGULA_ANTES_DE_ROTULO = re.compile(
+    r"(?i),\s*(?=(?:nome(?: completo)?|data de nascimento|nascimento|cpf|rg|identidade|e-?mail|endere[cç]o|cep)\s*[:=])")
+
+
+def _uma_linha_por_dado(texto: str) -> str:
+    """"Nome: Ana; CPF: 123; RG 45" numa linha so vira uma linha por dado (o rotulo so vale no comeco da linha)."""
+    if "\n" in texto:
+        return texto
+    return _RX_VIRGULA_ANTES_DE_ROTULO.sub("\n", texto.replace(";", "\n"))
+
+
 def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
     """Le os dados do cadastro numa mensagem so, em qualquer ordem.
 
@@ -940,7 +957,7 @@ def extrair_cadastro(texto: str, campo_esperado: str = "") -> dict:
     seca a pergunta de um campo so ("12/03/1990") vale para aquele campo.
     """
     achados: dict = {}
-    texto = _sem_texto_do_pedido(texto)
+    texto = _uma_linha_por_dado(_sem_texto_do_pedido(texto))
     resto = texto
 
     for rotulo, valor in _RX_ROTULO.findall(resto):

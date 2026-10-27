@@ -985,6 +985,16 @@ class NomeAntesDoPedido(unittest.TestCase):
         self.assertEqual(fp.extrair_nome("Izabela e quero marcar uma consulta"), "Izabela")
         self.assertEqual(fp.extrair_nome("Oi, quero marcar uma consulta"), "")
 
+    def test_queixa_de_atm_na_primeira_mensagem_nao_e_perguntada_de_novo(self):
+        f = fp.nova("5562999999999")
+        secretaria.decidir(f, "Marina Teste, quero marcar uma consulta, estou com dor na atm")
+        self.assertEqual(f["nome"], "Marina Teste")
+        self.assertIn("atm", f["queixa"].lower())
+        self.assertNotEqual(f["ultima_pergunta"], "queixa")
+        g = fp.nova("5562999999998")
+        secretaria.decidir(g, "o que é atm?")
+        self.assertFalse(g.get("queixa"))
+
     def test_nome_numa_duvida_e_com_saudacao_na_frente(self):
         for frase in ("Pedro gostaria de saber o valor", "Oi, Pedro gostaria de saber o valor",
                       "Bom dia! Pedro quanto custa a consulta?"):
@@ -992,6 +1002,25 @@ class NomeAntesDoPedido(unittest.TestCase):
         f = fp.nova("5562999999999")
         secretaria.decidir(f, "Oi, Pedro gostaria de saber o valor")
         self.assertEqual(f["nome"], "Pedro")
+
+
+class CadastroNumaLinhaSo(unittest.TestCase):
+    """Teste no WhatsApp (26/10): "Nome completo: X; nascimento ...; CPF: ..." só rendia o nome."""
+
+    ESPERADO = {"nome_completo": "Marina Teste Alves", "nascimento": "22/07/1985", "cpf": "529.982.247-25",
+                "rg": "7654321", "email": "marina.teste@exemplo.com", "cep": "76801-000"}
+
+    def test_ponto_e_virgula_e_virgula_com_rotulos(self):
+        for texto in (
+            "Nome completo: Marina Teste Alves; nascimento 22/07/1985; CPF: 529.982.247-25; RG 7654321; "
+            "email marina.teste@exemplo.com; endereco: Av Brasil 50, Centro, Porto Velho RO, CEP 76801-000",
+            "Nome completo: Marina Teste Alves, nascimento: 22/07/1985, CPF: 529.982.247-25, RG: 7654321, "
+            "email: marina.teste@exemplo.com, endereco: Av Brasil 50, Centro, Porto Velho RO, CEP 76801-000",
+        ):
+            achados = fp.extrair_cadastro(texto, "nome_completo")
+            for campo, valor in self.ESPERADO.items():
+                self.assertEqual(achados.get(campo), valor, (campo, texto))
+            self.assertTrue(achados["endereco"].startswith("Av Brasil 50"))
 
 
 class CadastroColadoDoModelo(unittest.TestCase):
