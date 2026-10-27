@@ -133,3 +133,45 @@ class EscolhaAutomatica(unittest.TestCase):
         }
         for texto, esperado in casos.items():
             self.assertEqual(horarios.escolher(self.VAGAS, texto), esperado, texto)
+
+
+class VagaMaisProxima(unittest.TestCase):
+    """Modo Auto: o que não cabe exato vira a vaga livre mais perto, não pedido para a equipe."""
+
+    VAGAS = EscolhaAutomatica.VAGAS
+
+    def test_exato_continua_exato(self):
+        self.assertEqual(horarios.proxima(self.VAGAS, "sexta às 16"), (datetime(2026, 10, 30, 16), True))
+
+    def test_hora_sem_vaga_vai_para_a_mais_perto_no_mesmo_dia(self):
+        vagas = [{"data": "2026-10-28", "dia": "Quarta", "horarios": ["08:00", "11:00", "14:00", "15:00"]}]
+        self.assertEqual(horarios.proxima(vagas, "quarta às 13h"), (datetime(2026, 10, 28, 14), False))
+        self.assertEqual(horarios.proxima(vagas, "quarta às 12h"), (datetime(2026, 10, 28, 11), False))
+
+    def test_dia_sem_atendimento_vai_para_o_mesmo_periodo(self):
+        self.assertEqual(horarios.proxima(self.VAGAS, "sábado de manhã"), (datetime(2026, 10, 27, 8), False))
+        self.assertEqual(horarios.proxima(self.VAGAS, "domingo à tarde"), (datetime(2026, 10, 27, 14), False))
+
+    def test_dia_bloqueado_ou_lotado_vai_para_a_primeira_vaga_que_resta(self):
+        self.assertEqual(horarios.proxima(self.VAGAS, "quintas de manhã"), (datetime(2026, 10, 27, 8), False))
+        self.assertEqual(horarios.proxima(self.VAGAS, "quinta às 15h"), (datetime(2026, 10, 27, 14), False))
+
+    def test_menos_um_dia_e_dia_relativo(self):
+        self.assertEqual(horarios.proxima(self.VAGAS, "qualquer horário, menos terça"), (datetime(2026, 10, 28, 8), True))
+        self.assertEqual(horarios.proxima(self.VAGAS, "terça ou sexta, exceto terça"), (datetime(2026, 10, 30, 14), True))
+        self.assertEqual(horarios.proxima(self.VAGAS, "amanhã de manhã"), (datetime(2026, 10, 27, 8), True))
+        self.assertEqual(horarios.proxima(self.VAGAS, "amanhã"), (datetime(2026, 10, 27, 8), True))
+
+    def test_sem_sentido_fica_para_a_equipe(self):
+        self.assertIsNone(horarios.proxima(self.VAGAS, "ainda não sei"))
+        self.assertIsNone(horarios.proxima([], "terça"))
+        self.assertIsNone(horarios.proxima(self.VAGAS, "dia 45"))
+
+    def test_dia_do_mes(self):
+        self.assertEqual(horarios.proxima(self.VAGAS, "dia 30"), (datetime(2026, 10, 30, 14), True))
+        self.assertEqual(horarios.proxima(self.VAGAS, "dia 30 às 16h"), (datetime(2026, 10, 30, 16), True))
+        self.assertEqual(horarios.proxima(self.VAGAS, "30/10 à tarde"), (datetime(2026, 10, 30, 14), True))
+        # sem vaga no dia 29: a data mais perto (28, a mais cedo no empate), e avisa
+        self.assertEqual(horarios.proxima(self.VAGAS, "dia 29"), (datetime(2026, 10, 28, 8), False))
+        # dia 30 de manhã: nao ha manha no dia 30, fica a data pedida
+        self.assertEqual(horarios.proxima(self.VAGAS, "dia 30 de manhã"), (datetime(2026, 10, 30, 14), False))

@@ -48,7 +48,10 @@ pronto-socorro/SAMU (192), e a conversa é transferida.
   e manda o horário para a Agenda. Horário ocupado gera alerta de conflito.
 - **Manual / Auto** (seletor no topo): no Auto a assistente marca sozinha a
   primeira vaga livre (Horários + Agenda + Google) que cabe no que o paciente
-  escreveu ("terças à tarde"); sem vaga, o pedido fica pendente aqui.
+  escreveu ("terças à tarde"). Se nada cabe (sábado, 13h no almoço, dia
+  bloqueado), reserva a vaga livre mais próxima e avisa o paciente. Só vai para
+  a equipe quando o texto não diz nada útil ("ainda não sei") ou o Google está
+  fora do ar. "Dia 30" e "30/10" miram essa data (ou a mais perto, se lotada).
 - **Agenda**: calendário (mês e semana) com as avaliações confirmadas; cada
   uma abre o resumo, com opções de remarcar e cancelar, ambas com aviso
   opcional ao paciente.

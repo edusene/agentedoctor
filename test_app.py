@@ -226,12 +226,14 @@ class TestAgendaAuto(unittest.TestCase):
     def test_vaga_automatica_so_no_modo_auto(self):
         ficha = {"disponibilidade": "terças à tarde"}
         with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "")):
-            self.assertEqual(app_mod._vaga_automatica(ficha), "")
+            self.assertEqual(app_mod._vaga_automatica(ficha), ("", True))
             app_mod.database.set_setting("agenda_modo", "auto")
-            self.assertEqual(app_mod._vaga_automatica(ficha), "2026-10-27T14:00")
-            self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "ainda não sei"}), "")
+            self.assertEqual(app_mod._vaga_automatica(ficha), ("2026-10-27T14:00", True))
+            self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "quintas de manhã"}),
+                             ("2026-10-27T08:00", False))  # nao ha quinta: a mais perto, avisando
+            self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "ainda não sei"}), ("", True))
 
     def test_sem_ver_o_google_a_equipe_decide(self):
         app_mod.database.set_setting("agenda_modo", "auto")
         with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "fora do ar")):
-            self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "terças"}), "")
+            self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "terças"}), ("", True))

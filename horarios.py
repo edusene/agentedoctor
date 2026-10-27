@@ -7,8 +7,9 @@ dias bloqueados (feriado, congresso). vagas() cruza isso com o que já está
 ocupado (agendamentos confirmados e eventos do Google) e devolve os horários
 que ainda cabem uma avaliação.
 
-No modo Auto do painel, escolher() devolve a vaga que cabe na disponibilidade
-do paciente e o agente agenda sozinho; no Manual a equipe confirma.
+No modo Auto do painel, proxima() devolve a vaga que cabe na disponibilidade do
+paciente (ou a mais perto, se nada cabe) e o agente agenda sozinho; no Manual a
+equipe confirma.
 
 Sem Flask, banco ou rede: as funções recebem tudo e são testáveis puras.
 """
@@ -226,21 +227,110 @@ def _filtros(texto: str) -> list[tuple[set, str, str, bool]]:
     return saida
 
 
-def escolher(vagas_livres: list[dict], disponibilidade: str) -> datetime | None:
-    """Primeira vaga que cabe no que o paciente disse; None se nenhuma cabe.
+def _periodo(h: str) -> str:
+    hh = int(h[:2])
+    return "manha" if hh < 12 else "tarde" if hh < 18 else "noite"
 
-    Sem dia nem período reconhecível ("quando der") não se escolhe: a equipe decide.
+
+def _minutos(h: str) -> int:
+    return int(h[:2]) * 60 + int(h[3:5])
+
+
+def _vagas_planas(vagas_livres: list[dict], fora: set = frozenset()) -> list[tuple[date, str]]:
+    """[(dia, 'HH:MM')] em ordem, sem os dias da semana em `fora`."""
+    planas = [(date.fromisoformat(v["data"]), h) for v in vagas_livres for h in v["horarios"]]
+    return [(d, h) for d, h in planas if d.weekday() not in fora]
+
+
+def _cabe(d: date, h: str, filtros: list) -> bool:
+    return any((not dias or d.weekday() in dias) and (not per or per == _periodo(h))
+               and (not hora or (h >= hora if a_partir else hora == h))
+               for dias, per, hora, a_partir in filtros)
+
+
+def _em_datetime(d: date, h: str) -> datetime:
+    return datetime.combine(d, datetime.strptime(h, "%H:%M").time())
+
+
+def escolher(vagas_livres: list[dict], disponibilidade: str) -> datetime | None:
+    """Primeira vaga que cabe exatamente no que o paciente disse; None se nenhuma cabe.
+
+    Sem dia nem período reconhecível ("ainda não sei") não se escolhe: a equipe decide.
     """
     filtros = _filtros(disponibilidade)
     if not filtros:
         return None
-    for v in vagas_livres:
-        dia = date.fromisoformat(v["data"])
-        for h in v["horarios"]:
-            hh = int(h[:2])
-            periodo = "manha" if hh < 12 else "tarde" if hh < 18 else "noite"
-            for dias, per, hora, a_partir in filtros:
-                if ((not dias or dia.weekday() in dias) and (not per or per == periodo)
-                        and (not hora or (h >= hora if a_partir else hora == h))):
-                    return datetime.combine(dia, datetime.strptime(h, "%H:%M").time())
+    for d, h in _vagas_planas(vagas_livres):
+        if _cabe(d, h, filtros):
+            return _em_datetime(d, h)
+    return None
+
+
+def _data_pedida(texto: str, vagas_livres: list[dict]) -> tuple[date | str | None, str]:
+    """("dia 30" ou "30/10") -> (a data, texto sem ela). (None, texto) se não há data; ("invalida", _) se impossível."""
+    m = re.search(r"\bdia (\d{1,2})\b(?!/)", texto) or re.search(r"\b(\d{1,2})/(\d{1,2})\b", texto)
+    if not m or not vagas_livres:
+        return None, texto
+    ref = date.fromisoformat(vagas_livres[0]["data"])
+    dia, mes = int(m.group(1)), int(m.group(2)) if m.re.groups > 1 else 0
+    for i in range(366):
+        d = ref + timedelta(days=i)
+        if d.day == dia and (not mes or d.month == mes):
+            return d, texto[:m.start()] + " " + texto[m.end():]
+    return "invalida", texto
+
+
+def proxima(vagas_livres: list[dict], disponibilidade: str) -> tuple[datetime, bool] | None:
+    """(vaga, exata?) para o modo Auto: o que o paciente pediu ou, se não houver, o mais perto.
+
+    Ordem: o pedido exato; os mesmos dias da semana com a hora mais perto (quarta 13h, no
+    almoço, vira 14h); o mesmo período em outro dia (sábado de manhã); a primeira vaga.
+    "Menos sexta" tira a sexta; "amanhã" vira "o quanto antes". None se o texto não diz nada
+    útil ("ainda não sei"): a equipe decide. "Dia 30" e "30/10" miram essa data; sem vaga nela,
+    vale a data mais perto.
+    """
+    texto = _sem_acento(disponibilidade)
+    fora = set()
+    m = _RX_RESTRICAO.search(texto)
+    if m:
+        fora = _dias_do_trecho(texto[m.end():])
+        texto = texto[:m.start()]
+    alvo, texto = _data_pedida(texto, vagas_livres)
+    if alvo == "invalida":
+        return None
+    relativo = bool(_RX_RELATIVO.search(texto))
+    texto = _RX_RELATIVO.sub(" ", texto)
+    filtros = _filtros(texto)
+    if not filtros:
+        if not (relativo or fora or alvo):
+            return None
+        filtros = [(set(), "", "", False)]  # só "amanhã" ou só "menos sexta": a primeira vaga serve
+    vagas = _vagas_planas(vagas_livres, fora)
+    horas_pedidas = [_minutos(f[2]) for f in filtros if f[2]]
+    periodos = {f[1] for f in filtros if f[1]}
+
+    def distancia(h: str) -> int:
+        return min((abs(_minutos(h) - p) for p in horas_pedidas), default=0)
+
+    if alvo:  # "dia 30": essa data se houver vaga; senão a data mais perto
+        if not vagas:
+            return None
+        sem_dia = [(set(), per, hora, ap) for _, per, hora, ap in filtros]
+        for d, h in vagas:
+            if d == alvo and _cabe(d, h, sem_dia):
+                return _em_datetime(d, h), True
+        d, h = min(vagas, key=lambda v: (abs((v[0] - alvo).days), _periodo(v[1]) not in periodos, distancia(v[1])))
+        return _em_datetime(d, h), False
+    for d, h in vagas:
+        if _cabe(d, h, filtros):
+            return _em_datetime(d, h), True
+    dias_pedidos = set().union(*(f[0] for f in filtros))
+    for candidatas in (
+        [(d, h) for d, h in vagas if d.weekday() in dias_pedidos],
+        [(d, h) for d, h in vagas if _periodo(h) in periodos],
+        vagas,
+    ):
+        if candidatas:
+            d, h = min(candidatas, key=lambda v: (v[0], _periodo(v[1]) not in periodos, distancia(v[1])))
+            return _em_datetime(d, h), False
     return None

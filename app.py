@@ -1056,11 +1056,12 @@ def handle_flush(user: str, items: list[dict]) -> None:
         mensagem, violacoes = secretaria.montar(decisao, texto_modelo, ficha.get("medico", ""))
         # Modo auto: o cartao da consulta marcada toma o lugar do "encaminhada
         # a equipe"; o do valor e as orientacoes seguem.
-        inicio_auto = _vaga_automatica(ficha) if decisao.encaminhar else ""
+        inicio_auto, exata = _vaga_automatica(ficha) if decisao.encaminhar else ("", True)
         if inicio_auto:
+            cartao = clinica.cartao_consulta_agendada(inicio_auto, preferencia=ficha.get("medico", ""))
             mensagem = mensagem.replace(
                 clinica.RESPOSTA_ENCAMINHADO,
-                clinica.cartao_consulta_agendada(inicio_auto, preferencia=ficha.get("medico", "")))
+                cartao if exata else f"{clinica.AVISO_HORARIO_PROXIMO}\n\n{cartao}")
         if violacoes:
             print(f"[trava] user={clinica.mascarar_fone(user)} resposta do modelo BARRADA {violacoes} "
                   f"(resposta com {len(texto_modelo)} chars)")
@@ -3016,19 +3017,21 @@ def horarios_livres(de: str = "", ate: str = "") -> tuple[list[dict], str]:
     return horarios.vagas(cfg, d_de, d_ate, ocupados, _duracao_padrao(), agora), erro
 
 
-def _vaga_automatica(ficha: dict) -> str:
-    """Modo auto: início ISO da vaga que cabe na disponibilidade do paciente, ou "" (a equipe decide)."""
+def _vaga_automatica(ficha: dict) -> tuple[str, bool]:
+    """Modo auto: (início ISO, é exatamente o pedido?) da vaga para o paciente; ("", True) = a equipe decide."""
     if _modo_agenda() != "auto":
-        return ""
+        return "", True
     try:
         vagas, erro = horarios_livres()
         if erro:  # sem ver o Google nao se marca: a equipe confirma
-            return ""
-        escolhida = horarios.escolher(vagas, str(ficha.get("disponibilidade") or ""))
+            return "", True
+        escolhida = horarios.proxima(vagas, str(ficha.get("disponibilidade") or ""))
     except Exception as e:
         print(f"[auto] WARN nao consegui escolher vaga: {e}")
-        return ""
-    return escolhida.strftime("%Y-%m-%dT%H:%M") if escolhida else ""
+        return "", True
+    if not escolhida:
+        return "", True
+    return escolhida[0].strftime("%Y-%m-%dT%H:%M"), escolhida[1]
 
 
 @app.get("/api/settings/horarios")
