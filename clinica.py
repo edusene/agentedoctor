@@ -171,7 +171,6 @@ RESPOSTA_DUVIDA_GENERICA = (
 )
 
 # Seção 18: ... AGENDAMENTO → CONFIRMAÇÃO → ORIENTAÇÕES PRÉ-CONSULTA.
-RESPOSTA_AGENDADA = "Perfeito! Sua avaliação foi agendada."
 RESPOSTA_ENCAMINHADO = (
     "Perfeito! Sua solicitação foi encaminhada à equipe, que vai confirmar o dia "
     "e horário da sua avaliação por aqui."

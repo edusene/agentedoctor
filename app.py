@@ -1060,8 +1060,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         if inicio_auto:
             mensagem = mensagem.replace(
                 clinica.RESPOSTA_ENCAMINHADO,
-                clinica.RESPOSTA_AGENDADA + "\n\n" + clinica.cartao_consulta_agendada(
-                    inicio_auto, preferencia=ficha.get("medico", "")))
+                clinica.cartao_consulta_agendada(inicio_auto, preferencia=ficha.get("medico", "")))
         if violacoes:
             print(f"[trava] user={clinica.mascarar_fone(user)} resposta do modelo BARRADA {violacoes} "
                   f"(resposta com {len(texto_modelo)} chars)")
