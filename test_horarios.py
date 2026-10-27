@@ -148,6 +148,15 @@ class VagaMaisProxima(unittest.TestCase):
         self.assertEqual(horarios.proxima(vagas, "quarta às 13h"), (datetime(2026, 10, 28, 14), False))
         self.assertEqual(horarios.proxima(vagas, "quarta às 12h"), (datetime(2026, 10, 28, 11), False))
 
+    def test_horario_ja_agendado_nao_e_oferecido_e_vira_proposta(self):
+        # Outro paciente ja tem 10h de segunda: a vaga some e o pedido "10h" recebe a mais perto.
+        ocupado = [(datetime(2026, 10, 19, 10), datetime(2026, 10, 19, 11))]
+        vagas = horarios.vagas(cfg(antecedencia_horas=0), date(2026, 10, 19), date(2026, 10, 20), ocupado, 60, AGORA)
+        self.assertNotIn("10:00", vagas[0]["horarios"])
+        escolhida = horarios.proxima(vagas, "segunda às 10h")
+        self.assertFalse(escolhida[1])
+        self.assertIn(escolhida[0], (datetime(2026, 10, 19, 9), datetime(2026, 10, 19, 11)))
+
     def test_dia_sem_atendimento_vai_para_o_mesmo_periodo(self):
         self.assertEqual(horarios.proxima(self.VAGAS, "sábado de manhã"), (datetime(2026, 10, 27, 8), False))
         self.assertEqual(horarios.proxima(self.VAGAS, "domingo à tarde"), (datetime(2026, 10, 27, 14), False))
