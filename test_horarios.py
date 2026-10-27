@@ -109,8 +109,15 @@ class EscolhaAutomatica(unittest.TestCase):
 
     def test_sem_vaga_ou_sem_criterio_nao_escolhe(self):
         self.assertIsNone(horarios.escolher(self.VAGAS, "quintas de manhã"))
-        self.assertIsNone(horarios.escolher(self.VAGAS, "quando der"))
+        self.assertIsNone(horarios.escolher(self.VAGAS, "qualquer horário, menos sexta"))
+        self.assertIsNone(horarios.escolher(self.VAGAS, "qualquer horário amanhã"))
+        self.assertIsNone(horarios.escolher(self.VAGAS, "ainda não sei"))
         self.assertIsNone(horarios.escolher([], "terça"))
+
+    def test_horario_aberto_pega_a_primeira_vaga(self):
+        for frase in ("qualquer horário", "Quando der", "tanto faz", "Qualquer dia e qualquer hora",
+                      "tenho disponibilidade total", "o que vocês tiverem"):
+            self.assertEqual(horarios.escolher(self.VAGAS, frase), datetime(2026, 10, 27, 8), frase)
 
     def test_variacoes(self):
         casos = {

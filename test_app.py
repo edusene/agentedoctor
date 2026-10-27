@@ -229,7 +229,7 @@ class TestAgendaAuto(unittest.TestCase):
             self.assertEqual(app_mod._vaga_automatica(ficha), "")
             app_mod.database.set_setting("agenda_modo", "auto")
             self.assertEqual(app_mod._vaga_automatica(ficha), "2026-10-27T14:00")
-            self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "quando der"}), "")
+            self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "ainda não sei"}), "")
 
     def test_sem_ver_o_google_a_equipe_decide(self):
         app_mod.database.set_setting("agenda_modo", "auto")

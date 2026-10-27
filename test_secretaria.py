@@ -985,6 +985,14 @@ class NomeAntesDoPedido(unittest.TestCase):
         self.assertEqual(fp.extrair_nome("Izabela e quero marcar uma consulta"), "Izabela")
         self.assertEqual(fp.extrair_nome("Oi, quero marcar uma consulta"), "")
 
+    def test_nome_numa_duvida_e_com_saudacao_na_frente(self):
+        for frase in ("Pedro gostaria de saber o valor", "Oi, Pedro gostaria de saber o valor",
+                      "Bom dia! Pedro quanto custa a consulta?"):
+            self.assertEqual(fp.extrair_nome(frase), "Pedro", frase)
+        f = fp.nova("5562999999999")
+        secretaria.decidir(f, "Oi, Pedro gostaria de saber o valor")
+        self.assertEqual(f["nome"], "Pedro")
+
 
 class CadastroColadoDoModelo(unittest.TestCase):
     """Conversa do Kalison (26/10): modelo colado com •, sem dois-pontos, e começando por 'Obrigada!'."""

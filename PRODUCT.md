@@ -16,7 +16,7 @@ O consultório de cirurgia bucomaxilofacial recebe pacientes pelo WhatsApp. A se
 2. **Dúvida aberta**: resposta travada em código quando existe; senão, modelo + RAG, com a saída conferida por `clinica.conferir_resposta()`.
 3. **Emergência**: sinais de urgência recebem a orientação de pronto-socorro/SAMU (192) e a conversa vai para a equipe.
 4. **Fila humana**: pedido de atendente, remarcar ou cancelar transfere para a equipe; o agente fica calado enquanto a equipe atende.
-5. **Agendamento**: pedido confirmado pelo paciente vira pendente em Agendamentos; a equipe confirma o horário, o paciente é avisado e o evento vai para a Agenda (e para o Google Calendar, se conectado). Na aba Agendamentos há o seletor **Manual/Auto** (pedido do doutor, 26/10): no Auto a assistente escolhe a primeira vaga livre que cabe na disponibilidade do paciente, marca na Agenda/Google e envia o cartão da consulta; sem vaga que caiba (ou Google fora do ar), o pedido fica pendente para a equipe.
+5. **Agendamento**: pedido confirmado pelo paciente vira pendente em Agendamentos; a equipe confirma o horário, o paciente é avisado e o evento vai para a Agenda (e para o Google Calendar, se conectado). Na aba Agendamentos há o seletor **Manual/Auto** (pedido do doutor, 26/10): no Auto a assistente escolhe a primeira vaga livre que cabe na disponibilidade do paciente, marca na Agenda/Google e envia o cartão da consulta; sem vaga que caiba (ou Google fora do ar, ou pedido com exceção/dia relativo como "menos sexta", "amanhã"; "qualquer horário" e "quando der" pegam a primeira vaga), o pedido fica pendente para a equipe.
 
 ## Regras de negócio e de segurança
 

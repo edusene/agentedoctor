@@ -163,6 +163,14 @@ _RX_HORA = re.compile(
 _RX_RELATIVO = re.compile(r"\b(amanha|hoje|depois de amanha|semana que vem|proxim\w+|mes que vem|dia \d+)\b")
 
 
+# Disponibilidade aberta ("qualquer horário", "quando der"); com restrição ("menos sexta") a equipe decide.
+_RX_QUALQUER = re.compile(
+    r"\bqualquer (?:horario|hora|dia|periodo|turno|momento)\b|\bquando (?:der|puder|voces puderem|for melhor para voces)\b"
+    r"|\btanto faz\b|\bsem preferencia\b|\bflexivel\b|\btodos os (?:horarios|dias|periodos)\b|\bdisponibilidade total\b"
+    r"|\bem qualquer\b|\bqualquer um\b|\bo que (?:voces )?tiver(?:em)?\b|\bo que der\b")
+_RX_RESTRICAO = re.compile(r"\b(?:menos|exceto|except\w*|so nao|nao (?:posso|consigo|da|dá)|fora)\b")
+
+
 def _sem_acento(t: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", t.lower()) if unicodedata.category(c) != "Mn")
 
@@ -187,7 +195,7 @@ def _filtros(texto: str) -> list[tuple[set, str, str, bool]]:
     None-like: texto com dia relativo ("amanhã") ou número que não é horário.
     """
     texto = _sem_acento(texto)
-    if _RX_RELATIVO.search(texto):
+    if _RX_RELATIVO.search(texto) or _RX_RESTRICAO.search(texto):
         return []
     saida = []
     for trecho in re.split(r"[;,\n]| e (?=\w)", texto):
@@ -208,6 +216,8 @@ def _filtros(texto: str) -> list[tuple[set, str, str, bool]]:
             a_partir = bool(re.search(r"a partir das|depois das|apos", trecho))
         if dias or periodo or hora:
             saida.append((dias, periodo, hora, a_partir))
+    if not saida and _RX_QUALQUER.search(texto):
+        return [(set(), "", "", False)]  # "qualquer horário": a primeira vaga serve
     # "terça e quinta à tarde": o período do último trecho vale para os dias soltos antes dele.
     for i in range(len(saida) - 2, -1, -1):
         dias, periodo, hora, a_partir = saida[i]

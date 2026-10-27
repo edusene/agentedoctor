@@ -409,14 +409,19 @@ def _limpar_nome(bruto: str) -> str:
 # nome vem sozinho antes do pedido.
 _RX_NOME_ANTES_DO_PEDIDO = re.compile(
     rf"(?i)^\s*([{_LETRAS}]+(?:\s+[{_LETRAS}]+){{0,2}})\s*(?:[,.;!:-]|\se)?\s+"
-    r"(?:quero|queria|gostaria|preciso|vim|venho|desejo|estou querendo|to querendo|tenho interesse)")
+    r"(?:quero|queria|gostaria|preciso|vim|venho|desejo|estou querendo|to querendo|tenho interesse|quanto)")
+
+
+# "Oi, Pedro gostaria de saber o valor": a saudacao antes do nome nao o esconde.
+_RX_SAUDACAO_INICIAL = re.compile(
+    r"(?i)^\s*(?:(?:ol[aá]|oi+|bom dia|boa tarde|boa noite|e a[ií]|opa)\b[\s,.!-]*)+")
 
 
 def extrair_nome(texto: str) -> str:
     m = _RX_NOME.search(texto or "")
     if m:
         return _limpar_nome(m.group(1))
-    m = _RX_NOME_ANTES_DO_PEDIDO.match(texto or "")
+    m = _RX_NOME_ANTES_DO_PEDIDO.match(_RX_SAUDACAO_INICIAL.sub("", texto or ""))
     if m and clinica.normalizar(m.group(1)) not in _NAO_E_NOME:
         return nome_de_resposta_direta(m.group(1))
     return ""
