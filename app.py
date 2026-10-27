@@ -1019,9 +1019,9 @@ def handle_flush(user: str, items: list[dict]) -> None:
             # A equipe pode ter confirmado, remarcado ou cancelado desde a
             # retomada: a situacao vem sempre fresca do banco.
             ficha["consulta"] = _consulta_atual(user)
-        _disp_antes = ficha.get("disponibilidade")
+        _antes = (ficha.get("disponibilidade"), dict(ficha.get("tentativas") or {}))
         decisao = secretaria.decidir(ficha, texto, secretaria.agora(), midia=midia)
-        _avisar_horario_sem_vaga(ficha, decisao, _disp_antes)
+        _avisar_horario_sem_vaga(ficha, decisao, *_antes)
         print(f"[secretaria] user={clinica.mascarar_fone(user)} decisao={decisao.tipos} "
               f"llm={decisao.usar_llm} proxima={ficha.get('ultima_pergunta')!r}")
 
@@ -3031,7 +3031,7 @@ def _agendar_no_auto(ficha: dict, decisao, mensagem: str) -> tuple[str, str]:
     return mensagem.replace(clinica.RESPOSTA_ENCAMINHADO, cartao), inicio
 
 
-def _avisar_horario_sem_vaga(ficha: dict, decisao, disp_antes) -> None:
+def _avisar_horario_sem_vaga(ficha: dict, decisao, disp_antes, tentativas_antes: dict | None = None) -> None:
     """Modo auto: o horário que o paciente acabou de dizer não existe -> avisa já, antes do resumo.
 
     Propõe a vaga mais perto no lugar da próxima pergunta do funil; "sim" retoma o funil
@@ -3045,6 +3045,10 @@ def _avisar_horario_sem_vaga(ficha: dict, decisao, disp_antes) -> None:
     if not inicio or exata:
         return
     ficha.update(ultima_pergunta="horario_proposto", horario_proposto=inicio)
+    # A pergunta do funil que o aviso substituiu nao foi feita: nao conta tentativa
+    # (duas propostas seguidas faziam a saude virar "Nao informado").
+    if tentativas_antes is not None:
+        ficha["tentativas"] = tentativas_antes
     decisao.confirmacao = ""
     decisao.pergunta_final = clinica.proposta_horario(inicio)
 

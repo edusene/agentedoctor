@@ -248,9 +248,10 @@ class TestAgendaAuto(unittest.TestCase):
     def test_avisa_na_hora_quando_o_horario_nao_existe(self):
         app_mod.database.set_setting("agenda_modo", "auto")
         d = app_mod.secretaria.Decisao(confirmacao="Certo.", pergunta_final="saude?")
-        ficha = {"disponibilidade": "quintas de manhã", "status": "coletando"}
+        ficha = {"disponibilidade": "quintas de manhã", "status": "coletando", "tentativas": {"saude": 1}}
         with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "")):
-            app_mod._avisar_horario_sem_vaga(ficha, d, "")
+            app_mod._avisar_horario_sem_vaga(ficha, d, "", {})
+        self.assertEqual(ficha["tentativas"], {})  # a saude nao foi perguntada: sem tentativa gasta
         self.assertEqual((ficha["ultima_pergunta"], ficha["horario_proposto"]), ("horario_proposto", "2026-10-27T08:00"))
         self.assertEqual(d.confirmacao, "")
         self.assertIn("Posso reservar", d.pergunta_final)
