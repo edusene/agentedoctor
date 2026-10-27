@@ -171,8 +171,6 @@ RESPOSTA_DUVIDA_GENERICA = (
 )
 
 # Seção 18: ... AGENDAMENTO → CONFIRMAÇÃO → ORIENTAÇÕES PRÉ-CONSULTA.
-# Modo Auto sem vaga no que o paciente pediu: reservou a mais perto e avisa.
-AVISO_HORARIO_PROXIMO = "Não tenho vaga exatamente no horário que você pediu, então reservei o mais próximo:"
 RESPOSTA_ENCAMINHADO = (
     "Perfeito! Sua solicitação foi encaminhada à equipe, que vai confirmar o dia "
     "e horário da sua avaliação por aqui."
@@ -287,6 +285,14 @@ def cartao_consulta_agendada(inicio: str, remarcada: bool = False, preferencia: 
             f"📌 Dia {d.strftime('%d/%m')} ({_DIAS_SEMANA_CAP[d.weekday()]})\n"
             f"⏱️ {d.strftime('%H:%M')} horas\n"
             f"🏥 {LOCAL_CONSULTA}")
+
+
+def proposta_horario(inicio: str) -> str:
+    """Modo Auto sem vaga no que o paciente pediu: propõe o mais perto e NÃO marca antes do "sim"."""
+    d = datetime.fromisoformat(inicio)
+    return ("Não tenho vaga exatamente no horário que você pediu. O mais próximo que tenho é "
+            f"{_DIAS_SEMANA_CAP[d.weekday()]}, dia {d.strftime('%d/%m')}, às {d.strftime('%H:%M')}. "
+            "Posso reservar para você? Se preferir, me diga outro dia ou horário.")
 
 
 # A paciente pergunta se fala com uma pessoa: a resposta e sempre a verdade,

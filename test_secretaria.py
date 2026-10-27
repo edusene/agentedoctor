@@ -1004,6 +1004,53 @@ class NomeAntesDoPedido(unittest.TestCase):
         self.assertEqual(f["nome"], "Pedro")
 
 
+class HorarioProposto(unittest.TestCase):
+    """Modo Auto sem vaga exata: a assistente propõe o mais perto e só marca depois do "sim" (26/10)."""
+
+    def _ficha(self):
+        f = fp.nova("5562999999999")
+        f.update(nome="Ana", queixa="siso", medico="Sem preferência", status="aguardando_confirmacao",
+                 ultima_pergunta="horario_proposto", horario_proposto="2026-10-28T14:00",
+                 disponibilidade="quarta às 13h")
+        return f
+
+    def test_sim_aceita_o_horario_proposto_e_encaminha(self):
+        f = self._ficha()
+        d = secretaria.decidir(f, "sim, pode ser")
+        self.assertTrue(d.encaminhar)
+        self.assertEqual(f["horario_aceito"], "28/10 às 14:00")
+        self.assertEqual(f["status"], "encaminhado")
+
+    def test_nao_pergunta_outro_horario_sem_marcar(self):
+        f = self._ficha()
+        d = secretaria.decidir(f, "não")
+        self.assertFalse(d.encaminhar)
+        self.assertEqual(f["ultima_pergunta"], "horario_novo")
+        self.assertIn("Qual dia e horário", " ".join(d.partes))
+        d = secretaria.decidir(f, "quinta às 15h")
+        self.assertTrue(d.encaminhar)
+        self.assertEqual(f["disponibilidade"], "quinta às 15h")
+
+    def test_outro_horario_direto_vale_como_novo_pedido(self):
+        f = self._ficha()
+        f["horario_aceito"] = "01/01 às 08:00"
+        d = secretaria.decidir(f, "prefiro sexta de manhã")
+        self.assertTrue(d.encaminhar)
+        self.assertEqual(f["disponibilidade"], "prefiro sexta de manhã")
+        self.assertNotIn("horario_aceito", f)
+
+    def test_pergunta_no_meio_nao_marca_nem_aceita(self):
+        f = self._ficha()
+        d = secretaria.decidir(f, "esse horário é de manhã?")
+        self.assertFalse(d.encaminhar)
+        self.assertEqual(f["status"], "aguardando_confirmacao")
+
+    def test_texto_da_proposta(self):
+        txt = clinica.proposta_horario("2026-10-28T14:00")
+        self.assertIn("Quarta-feira, dia 28/10, às 14:00", txt)
+        self.assertIn("Posso reservar", txt)
+
+
 class CadastroNumaLinhaSo(unittest.TestCase):
     """Teste no WhatsApp (26/10): "Nome completo: X; nascimento ...; CPF: ..." só rendia o nome."""
 

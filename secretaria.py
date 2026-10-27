@@ -231,7 +231,26 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
             d.pergunta_final = fp.PERGUNTA_CONFIRMACAO
             ficha["ultima_pergunta"] = "confirmacao"
             return fechar()
-        if clinica.e_sim(texto) and "?" not in texto:
+        # Modo Auto sem vaga no que o paciente pediu: a assistente propôs o mais perto
+        # (app._propor_horario) e espera. "Sim" marca esse; "não" pergunta outro; um
+        # horário novo é avaliado de novo.
+        confirmou = False
+        if ultima_c in ("horario_proposto", "horario_novo") and "?" not in texto:
+            if ultima_c == "horario_proposto" and clinica.e_sim(texto):
+                proposto = datetime.fromisoformat(ficha.get("horario_proposto") or "2000-01-01T00:00")
+                ficha["horario_aceito"] = f"{proposto:%d/%m} às {proposto:%H:%M}"
+                confirmou = True
+            elif ultima_c == "horario_proposto" and clinica.e_nao(texto):
+                ficha["ultima_pergunta"] = "horario_novo"
+                d.tipos.append("pedir_outro_horario")
+                d.partes.append("Sem problema! Qual dia e horário ficam melhores para você?")
+                return fechar()
+            else:
+                ficha["disponibilidade"] = texto[:300]
+                ficha.pop("horario_aceito", None)
+                confirmou = True
+        if confirmou or (clinica.e_sim(texto) and "?" not in texto
+                         and ultima_c not in ("horario_proposto", "horario_novo")):
             ficha["status"] = "encaminhado"
             ficha["ultima_pergunta"] = ""
             d.tipos.append("encaminhado")

@@ -1056,12 +1056,7 @@ def handle_flush(user: str, items: list[dict]) -> None:
         mensagem, violacoes = secretaria.montar(decisao, texto_modelo, ficha.get("medico", ""))
         # Modo auto: o cartao da consulta marcada toma o lugar do "encaminhada
         # a equipe"; o do valor e as orientacoes seguem.
-        inicio_auto, exata = _vaga_automatica(ficha) if decisao.encaminhar else ("", True)
-        if inicio_auto:
-            cartao = clinica.cartao_consulta_agendada(inicio_auto, preferencia=ficha.get("medico", ""))
-            mensagem = mensagem.replace(
-                clinica.RESPOSTA_ENCAMINHADO,
-                cartao if exata else f"{clinica.AVISO_HORARIO_PROXIMO}\n\n{cartao}")
+        mensagem, inicio_auto = _agendar_no_auto(ficha, decisao, mensagem)
         if violacoes:
             print(f"[trava] user={clinica.mascarar_fone(user)} resposta do modelo BARRADA {violacoes} "
                   f"(resposta com {len(texto_modelo)} chars)")
@@ -3017,6 +3012,23 @@ def horarios_livres(de: str = "", ate: str = "") -> tuple[list[dict], str]:
     return horarios.vagas(cfg, d_de, d_ate, ocupados, _duracao_padrao(), agora), erro
 
 
+def _agendar_no_auto(ficha: dict, decisao, mensagem: str) -> tuple[str, str]:
+    """(mensagem, início ISO marcado). Vaga exata: o cartão toma o lugar do "encaminhada à equipe".
+    Sem vaga exata: NÃO marca; propõe a mais perto e espera o paciente (secretaria.decidir)."""
+    if not decisao.encaminhar:
+        return mensagem, ""
+    inicio, exata = _vaga_automatica(ficha)
+    if not inicio:
+        return mensagem, ""
+    if not exata:
+        ficha.update(status="aguardando_confirmacao", ultima_pergunta="horario_proposto",
+                     horario_proposto=inicio)
+        decisao.encaminhar = False
+        return clinica.proposta_horario(inicio), ""
+    cartao = clinica.cartao_consulta_agendada(inicio, preferencia=ficha.get("medico", ""))
+    return mensagem.replace(clinica.RESPOSTA_ENCAMINHADO, cartao), inicio
+
+
 def _vaga_automatica(ficha: dict) -> tuple[str, bool]:
     """Modo auto: (início ISO, é exatamente o pedido?) da vaga para o paciente; ("", True) = a equipe decide."""
     if _modo_agenda() != "auto":
@@ -3025,7 +3037,7 @@ def _vaga_automatica(ficha: dict) -> tuple[str, bool]:
         vagas, erro = horarios_livres()
         if erro:  # sem ver o Google nao se marca: a equipe confirma
             return "", True
-        escolhida = horarios.proxima(vagas, str(ficha.get("disponibilidade") or ""))
+        escolhida = horarios.proxima(vagas, str(ficha.get("horario_aceito") or ficha.get("disponibilidade") or ""))
     except Exception as e:
         print(f"[auto] WARN nao consegui escolher vaga: {e}")
         return "", True

@@ -233,6 +233,28 @@ class TestAgendaAuto(unittest.TestCase):
                              ("2026-10-27T08:00", False))  # nao ha quinta: a mais perto, avisando
             self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "ainda não sei"}), ("", True))
 
+    def test_sem_vaga_exata_propoe_e_nao_marca(self):
+        app_mod.database.set_setting("agenda_modo", "auto")
+        decisao = app_mod.secretaria.Decisao(encaminhar=True)
+        ficha = {"disponibilidade": "quintas de manhã", "status": "encaminhado"}
+        with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "")):
+            msg, inicio = app_mod._agendar_no_auto(ficha, decisao, "encaminhada")
+        self.assertEqual(inicio, "")
+        self.assertFalse(decisao.encaminhar)  # nada de agendamento criado
+        self.assertEqual((ficha["status"], ficha["ultima_pergunta"], ficha["horario_proposto"]),
+                         ("aguardando_confirmacao", "horario_proposto", "2026-10-27T08:00"))
+        self.assertIn("Posso reservar", msg)
+
+    def test_horario_aceito_marca_com_o_cartao(self):
+        app_mod.database.set_setting("agenda_modo", "auto")
+        decisao = app_mod.secretaria.Decisao(encaminhar=True)
+        ficha = {"disponibilidade": "quintas de manhã", "horario_aceito": "27/10 às 08:00"}
+        with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "")):
+            msg, inicio = app_mod._agendar_no_auto(ficha, decisao, app_mod.clinica.RESPOSTA_ENCAMINHADO)
+        self.assertEqual(inicio, "2026-10-27T08:00")
+        self.assertTrue(decisao.encaminhar)
+        self.assertIn("Sua Consulta foi agendada", msg)
+
     def test_sem_ver_o_google_a_equipe_decide(self):
         app_mod.database.set_setting("agenda_modo", "auto")
         with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "fora do ar")):
