@@ -1045,6 +1045,34 @@ class HorarioProposto(unittest.TestCase):
         self.assertFalse(d.encaminhar)
         self.assertEqual(f["status"], "aguardando_confirmacao")
 
+    def _antes_do_resumo(self):
+        f = self._ficha()
+        f["status"] = "coletando"
+        return f
+
+    def test_antes_do_resumo_sim_aceita_e_segue_o_funil(self):
+        f = self._antes_do_resumo()
+        d = secretaria.decidir(f, "sim, pode ser")
+        self.assertFalse(d.encaminhar)
+        self.assertEqual((f["horario_aceito"], f["disponibilidade"]), ("28/10 às 14:00", "28/10 às 14:00"))
+        self.assertEqual(f["ultima_pergunta"], "nome_completo")  # segue o funil
+        self.assertIn("Perfeito.", d.confirmacao)
+
+    def test_antes_do_resumo_nao_e_horario_novo(self):
+        f = self._antes_do_resumo()
+        d = secretaria.decidir(f, "não")
+        self.assertEqual(f["ultima_pergunta"], "horario_novo")
+        self.assertIn("Qual dia e horário", " ".join(d.partes))
+        d = secretaria.decidir(f, "quinta às 15h")
+        self.assertEqual((f["disponibilidade"], f["ultima_pergunta"]), ("quinta às 15h", "nome_completo"))
+        self.assertIn("captura:disponibilidade", d.tipos)
+
+    def test_antes_do_resumo_duvida_repete_a_proposta(self):
+        f = self._antes_do_resumo()
+        d = secretaria.decidir(f, "esse horário é de manhã?")
+        self.assertEqual(f["ultima_pergunta"], "horario_proposto")
+        self.assertIn("Posso reservar", d.pergunta_final)
+
     def test_texto_da_proposta(self):
         txt = clinica.proposta_horario("2026-10-28T14:00")
         self.assertIn("Quarta-feira, dia 28/10, às 14:00", txt)

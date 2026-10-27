@@ -245,6 +245,25 @@ class TestAgendaAuto(unittest.TestCase):
                          ("aguardando_confirmacao", "horario_proposto", "2026-10-27T08:00"))
         self.assertIn("Posso reservar", msg)
 
+    def test_avisa_na_hora_quando_o_horario_nao_existe(self):
+        app_mod.database.set_setting("agenda_modo", "auto")
+        d = app_mod.secretaria.Decisao(confirmacao="Certo.", pergunta_final="saude?")
+        ficha = {"disponibilidade": "quintas de manhã", "status": "coletando"}
+        with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "")):
+            app_mod._avisar_horario_sem_vaga(ficha, d, "")
+        self.assertEqual((ficha["ultima_pergunta"], ficha["horario_proposto"]), ("horario_proposto", "2026-10-27T08:00"))
+        self.assertEqual(d.confirmacao, "")
+        self.assertIn("Posso reservar", d.pergunta_final)
+
+    def test_nao_avisa_se_cabe_exato_ou_nada_mudou(self):
+        app_mod.database.set_setting("agenda_modo", "auto")
+        with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "")):
+            exato = app_mod.secretaria.Decisao(pergunta_final="saude?")
+            app_mod._avisar_horario_sem_vaga({"disponibilidade": "terças à tarde"}, exato, "")
+            igual = app_mod.secretaria.Decisao(pergunta_final="saude?")
+            app_mod._avisar_horario_sem_vaga({"disponibilidade": "quintas"}, igual, "quintas")
+        self.assertEqual((exato.pergunta_final, igual.pergunta_final), ("saude?", "saude?"))
+
     def test_horario_aceito_marca_com_o_cartao(self):
         app_mod.database.set_setting("agenda_modo", "auto")
         decisao = app_mod.secretaria.Decisao(encaminhar=True)

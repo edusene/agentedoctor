@@ -275,6 +275,32 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
 
     ultima = ficha.get("ultima_pergunta", "")
 
+    # ── 3a. Modo Auto: horário pedido sem vaga, avisado na hora (antes do resumo) ──
+    # app._avisar_horario_sem_vaga propôs o mais perto e espera. "Sim" aceita e o
+    # funil segue; "não" pergunta outro; um horário novo é avaliado de novo.
+    if (ultima in ("horario_proposto", "horario_novo") and texto and not midia
+            and "?" not in texto and ficha.get("status") != "aguardando_confirmacao"):
+        if ultima == "horario_proposto" and clinica.e_sim(texto):
+            proposto = datetime.fromisoformat(ficha.get("horario_proposto") or "2000-01-01T00:00")
+            ficha["horario_aceito"] = f"{proposto:%d/%m} às {proposto:%H:%M}"
+            ficha["disponibilidade"] = ficha["horario_aceito"]
+            ficha["ultima_pergunta"] = ""
+            d.tipos.append("horario_aceito")
+            d.confirmacao = "Perfeito."
+        elif ultima == "horario_proposto" and clinica.e_nao(texto):
+            ficha["ultima_pergunta"] = "horario_novo"
+            d.tipos.append("pedir_outro_horario")
+            d.partes.append("Sem problema! Qual dia e horário ficam melhores para você?")
+            return fechar()
+        else:
+            ficha["disponibilidade"] = texto[:300]
+            ficha.pop("horario_aceito", None)
+            ficha["ultima_pergunta"] = ""
+            d.tipos.append("captura:disponibilidade")
+            d.confirmacao = "Certo."
+        _proximo_passo(ficha, d, False)
+        return fechar()
+
     # ── 3b. Mensagens que não respondem à pergunta (travadas, sem IA) ─────────
     # Antes iam para o modelo ("pq?", "?", "tem alguém aí?") ou eram gravadas
     # como resposta ("kkkk" virava o exame do paciente).
@@ -435,6 +461,12 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
         d.confirmacao = f"{saudacao(momento)}!"
 
     # ── 9. Próximo passo do funil ─────────────────────────────────────────────
+    if ultima in ("horario_proposto", "horario_novo") and ficha.get("status") != "aguardando_confirmacao":
+        # Dúvida no meio da proposta de horário: responde e repete a proposta.
+        d.pergunta_final = (clinica.proposta_horario(ficha.get("horario_proposto") or "")
+                            if ultima == "horario_proposto"
+                            else "Qual dia e horário ficam melhores para você?")
+        return fechar()
     _proximo_passo(ficha, d, cobre_queixa)
     return fechar()
 

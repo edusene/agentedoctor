@@ -49,7 +49,8 @@ pronto-socorro/SAMU (192), e a conversa é transferida.
 - **Manual / Auto** (seletor no topo): no Auto a assistente marca sozinha a
   primeira vaga livre (Horários + Agenda + Google) que cabe no que o paciente
   escreveu ("terças à tarde"). Se nada cabe exato (sábado, 13h no almoço, dia
-  bloqueado), **não marca**: avisa, propõe a vaga livre mais próxima e pergunta
+  bloqueado), **não marca**: avisa na hora (logo após o paciente dizer o
+  horário, antes da saúde e do resumo), propõe a vaga livre mais próxima e pergunta
   se pode reservar ou se o paciente prefere outro dia/horário; só marca depois
   do "sim". Vai para a equipe quando o texto não diz nada útil ("ainda não
   sei") ou o Google está fora do ar. "Dia 30" e "30/10" miram essa data.
