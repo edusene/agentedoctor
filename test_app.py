@@ -178,6 +178,11 @@ class TestLimites(unittest.TestCase):
                        headers={"X-Forwarded-For": f"9.9.9.{i}, 1.2.3.4"})
         self.assertEqual(r.status_code, 429)
 
+    def test_cookie_do_login_so_e_secure_em_https(self):
+        for base, esperado in (("https://painel.exemplo", True), ("http://localhost", False)):
+            with app_mod.app.test_request_context("/", base_url=base):
+                self.assertEqual(app_mod.app.session_interface.get_cookie_secure(app_mod.app), esperado)
+
     def test_teto_de_chamadas_ao_modelo_por_numero(self):
         app_mod._llm_chamadas.clear()
         resultados = [app_mod._llm_dentro_do_limite("5562000000000") for _ in range(app_mod._LLM_POR_HORA + 1)]

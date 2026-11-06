@@ -30,6 +30,7 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 from flask import Flask, request, jsonify, Response, redirect, url_for, render_template, session
+from flask.sessions import SecureCookieSessionInterface
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -1423,17 +1424,24 @@ def _extract_body_from_meta_message(msg_data: dict) -> tuple[str, str, str]:
 
 # ── App & Buffer ──────────────────────────────────────────────────────────────
 
+class _SessaoHttps(SecureCookieSessionInterface):
+    """Cookie de login `Secure` quando a requisicao chegou por https (proxy do Render ou do Coolify)."""
+
+    def get_cookie_secure(self, app):
+        return request.is_secure
+
+
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+app.session_interface = _SessaoHttps()
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = bool(os.getenv("RENDER"))  # Render define RENDER=true
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # uploads de PDF/DOCX do knowledge
 
 # Atras do proxy do Render todo mundo chegava com o mesmo endereco (o limite era do
 # painel INTEIRO). ProxyFix(x_for=1) usa o IP que o proxy acrescentou e ignora o que o
 # cliente escreve no X-Forwarded-For (recomendado pela documentacao do Flask-Limiter).
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)  # x_proto: request.is_secure atras do proxy
 
 limiter = Limiter(get_remote_address, app=app, default_limits=["200 per minute"],
                   default_limits_exempt_when=lambda: bool(session.get("logged_in")))

@@ -72,7 +72,7 @@ Nada crítico; sem segredo ativo no histórico. Corrigido nesta entrega (testes 
 - **F1** chave do rate limit usava o primeiro `X-Forwarded-For` (forjável); agora o último salto.
 - **F2** webhook agora **recusa** pedido sem assinatura ou sem `DATAFY_WEBHOOK_SECRET` (a menos que `WEBHOOK_EXIGE_ASSINATURA=0`). **Antes do deploy, confirme que `DATAFY_WEBHOOK_SECRET` existe no Render**; sem ele o bot deixa de receber mensagens.
 - **F3** logs: telefone mascarado (`5562...99`), texto do paciente e da transcrição fora dos logs, nome de perfil fora. As linhas `[tempo]` seguem completas.
-- **F4** editor de `.env` rejeita quebra de linha. **F5** sessão de 12 h e cookie `Secure` quando `RENDER` está definido (o Render define). **F6** toast/iniciais escapados e HSTS. **F7 parcial** `MAX_CONTENT_LENGTH` 25 MB.
+- **F4** editor de `.env` rejeita quebra de linha. **F5** sessão de 12 h e cookie `Secure` quando a requisição chega por https (`request.is_secure`, com `ProxyFix(x_proto=1)`; vale no Render e no Coolify). **F6** toast/iniciais escapados e HSTS. **F7 parcial** `MAX_CONTENT_LENGTH` 25 MB.
 - **F8** teto de 12 chamadas ao modelo por número por hora (contador em memória, zera no reinício); no máximo 500 respostas abertas em cache; guarda de saída ampliada com preço por extenso/gíria e diagnóstico parafraseado ("pode ser um cisto").
 - **F9** token do canal Google em tempo constante; **refresh token do Google cifrado no banco** (Fernet, chave derivada da `SECRET_KEY`; token antigo em texto é cifrado na primeira leitura; se a `SECRET_KEY` mudar, reconectar o Google); tipos MIME do provedor só entram em `data:` se forem mídia conhecida. Nova dependência: `cryptography`.
 - **F5/F7 completos** logout só por POST (botão "Sair" virou formulário); corpo do `/webhook` limitado a 1 MB (413).
@@ -89,7 +89,6 @@ Dos 14 achados, corrigidos: segredo do webhook lido na hora (rotação pelo pain
 |---|---|---|
 | F2: confirmar `WHATSAPI_WEBHOOK_SECRET` (e `WHATSAPI_KEY`, `WHATSAPI_PHONE_NUMBER_ID`) no Render | Sem acesso ao painel do Render daqui | Após o deploy, uma mensagem de teste deve chegar; se o log mostrar `Recusado`, definir a variável |
 | Rate limit do login assume 1 salto de proxy (`ProxyFix(x_for=1)`) | Não dá para ver o `X-Forwarded-For` real do Render daqui; com Cloudflare na frente o IP seria compartilhado e o limite de 5/min viraria global | Conferir o cabeçalho nos logs do Render e ajustar `x_for` |
-| Cookie `Secure` depende de `RENDER` estar definido | Variável do Render, não verificada daqui | Conferir o login no Render após o deploy |
 | Render instala `requirements.txt` (sem pins) | Comando de build é decisão de deploy | Trocar para `requirements.lock`, se quiser versões fixas |
 | Rate limit do login em memória por processo | Sem storage compartilhado | Só importa com mais de um worker; então usar Redis |
 | `app.py` ~3,6 mil linhas e outros arquivos acima de 350 | Dividir 113 rotas sem testes de rota suficientes é risco alto | Dividir por Blueprints, uma área por vez, junto de testes em `test_app.py` |
