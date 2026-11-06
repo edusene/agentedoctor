@@ -239,18 +239,24 @@ async function loadDashboard() {
     renderEnvio(stats.envio);
 }
 
-/* Barras em SVG: valores = [{rotulo, n, destaque}] */
-function barrasSvg(valores, { limite = 0, altura = 110 } = {}) {
+/* Barras em SVG (viewBox fixo, o texto escala junto): valores = [{rotulo, n, destaque, eixo}] */
+function barrasSvg(valores, { limite = 0, altura = 120 } = {}) {
+    const W = 320, topo = 14, base = altura - 16, util = base - topo;
     const max = Math.max(1, limite, ...valores.map(v => v.n));
-    const larg = 100 / valores.length;
+    const slot = W / valores.length, larg = Math.max(3, slot * 0.7);
     const barras = valores.map((v, i) => {
-        const h = (v.n / max) * (altura - 16);
-        return `<g><title>${v.rotulo}: ${v.n}</title>
-            <rect x="${i * larg + larg * 0.15}%" y="${altura - h}" width="${larg * 0.7}%" height="${h}" rx="2"
-                  fill="${v.destaque ? 'var(--accent)' : 'var(--accent-hover)'}" opacity="${v.destaque ? 1 : 0.55}"/></g>`;
+        const h = (v.n / max) * util, x = i * slot + (slot - larg) / 2;
+        const num = v.n ? `<text x="${x + larg / 2}" y="${base - h - 3}" text-anchor="middle" font-size="9" fill="var(--text)">${v.n}</text>` : '';
+        const eixo = v.eixo ? `<text x="${x + larg / 2}" y="${altura - 3}" text-anchor="middle" font-size="9" fill="var(--text-muted)">${v.eixo}</text>` : '';
+        return `<g><title>${v.rotulo}: ${v.n} enviadas</title>
+            <rect x="${x}" y="${base - h}" width="${larg}" height="${Math.max(h, v.n ? 1 : 0)}" rx="2"
+                  fill="var(--accent)" opacity="${v.destaque ? 1 : 0.55}"/>${num}${eixo}</g>`;
     }).join('');
-    const linha = limite ? `<line x1="0" x2="100%" y1="${altura - (limite / max) * (altura - 16)}" y2="${altura - (limite / max) * (altura - 16)}" stroke="#ef4444" stroke-dasharray="4 3"/>` : '';
-    return `<svg width="100%" height="${altura}" role="img">${barras}${linha}</svg>`;
+    const yl = base - (limite / max) * util;
+    const linha = limite ? `<line x1="0" x2="${W}" y1="${yl}" y2="${yl}" stroke="#ef4444" stroke-dasharray="4 3"/>
+        <text x="${W}" y="${yl - 3}" text-anchor="end" font-size="9" fill="#ef4444">limite ${limite}</text>` : '';
+    return `<svg width="100%" viewBox="0 0 ${W} ${altura}" role="img">
+        <line x1="0" x2="${W}" y1="${base}" y2="${base}" stroke="var(--border)"/>${barras}${linha}</svg>`;
 }
 
 function renderEnvio(e) {
@@ -265,8 +271,10 @@ function renderEnvio(e) {
         ? `<span style="color:#f59e0b">No ritmo atual, fecha o mês com ~${e.previsao} (acima do limite).</span>`
         : `No ritmo atual, fecha o mês com ~${e.previsao}.`;
     const total = (e.origem.bot + e.origem.equipe) || 1;
-    const dias = e.dias.map(d => ({ rotulo: `dia ${d.dia}`, n: d.enviadas, destaque: d.dia === e.hoje }));
-    const hist = e.historico.map((h, i) => ({ rotulo: h.mes, n: h.enviadas, destaque: i === e.historico.length - 1 }));
+    const dias = e.dias.map(d => ({ rotulo: `dia ${d.dia}`, n: d.enviadas, destaque: d.dia === e.hoje,
+        eixo: (d.dia === 1 || d.dia % 5 === 0 || d.dia === e.dias.length) ? d.dia : '' }));
+    const hist = e.historico.map((h, i) => ({ rotulo: h.mes, n: h.enviadas, destaque: i === e.historico.length - 1,
+        eixo: h.mes }));
     el.innerHTML = `
         <div class="envio-card">
             <div class="envio-topo">
@@ -281,16 +289,15 @@ function renderEnvio(e) {
         </div>
         <div class="envio-graficos">
             <div class="envio-card">
-                <div class="stat-label">Enviadas por dia (${e.mes}) — linha vermelha: limite</div>
-                ${barrasSvg(dias, { altura: 120 })}
+                <div class="stat-label">Mensagens enviadas por dia em ${e.mes} (hoje em destaque)</div>
+                ${barrasSvg(dias)}
             </div>
             <div class="envio-card">
-                <div class="stat-label">Enviadas por mês (últimos ${hist.length}) — linha vermelha: limite</div>
-                ${barrasSvg(hist, { limite: e.limite, altura: 120 })}
-                <div class="envio-legenda">${hist.map(h => `<span>${h.rotulo}</span>`).join('')}</div>
+                <div class="stat-label">Mensagens enviadas por mês (a linha vermelha é o limite grátis)</div>
+                ${barrasSvg(hist, { limite: e.limite })}
             </div>
             <div class="envio-card">
-                <div class="stat-label">Quem enviou em ${e.mes}</div>
+                <div class="stat-label">Quem enviou em ${e.mes} (roxo: Secretária IA)</div>
                 <div class="envio-barra"><div style="width:${Math.round(e.origem.bot / total * 100)}%;background:var(--accent)"></div></div>
                 <div class="muted">Secretária IA: ${e.origem.bot} · Equipe: ${e.origem.equipe}</div>
             </div>

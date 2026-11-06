@@ -4659,4 +4659,3 @@ select option {
 .envio-barra > div { height: 100%; border-radius: 6px; }
 .envio-graficos { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
 .envio-graficos .envio-card { margin-bottom: 0; }
-.envio-legenda { display: flex; justify-content: space-around; font-size: 11px; color: var(--text-muted); }
