@@ -284,3 +284,31 @@ class TestAgendaAuto(unittest.TestCase):
         app_mod.database.set_setting("agenda_modo", "auto")
         with mock.patch.object(app_mod, "horarios_livres", return_value=(self.VAGAS, "fora do ar")):
             self.assertEqual(app_mod._vaga_automatica({"disponibilidade": "terças"}), ("", True))
+
+
+class TestEnvioMensal(unittest.TestCase):
+    def test_conta_so_enviadas_do_mes_local_e_vira_o_mes_pelo_fuso(self):
+        from datetime import datetime, timedelta
+        import database
+        agora = datetime.utcnow() + timedelta(hours=-3)
+        este = agora.replace(day=1, hour=12, minute=0, second=0, microsecond=0) + timedelta(hours=3)
+        linhas = [{"created_at": este.isoformat(), "sender": "agent"},
+                  {"created_at": este.isoformat(), "sender": "human"},
+                  {"created_at": (este - timedelta(days=40)).isoformat(), "sender": "agent"}]
+        with mock.patch.object(database.db, "fetch_all", return_value=linhas):
+            e = database._envio_mensal(timedelta(hours=-3))
+        self.assertEqual((e["enviadas"], e["origem"]), (2, {"bot": 1, "equipe": 1}))
+        self.assertEqual(e["limite"], 1000)
+        self.assertFalse(e["excedeu"])
+        self.assertEqual(len(e["historico"]), 6)
+        self.assertEqual(e["historico"][-1]["enviadas"], 2)
+        self.assertEqual(sum(d["enviadas"] for d in e["dias"]), 2)
+
+    def test_passou_do_limite(self):
+        from datetime import datetime, timedelta
+        import database
+        t = (datetime.utcnow() + timedelta(hours=3)).isoformat()
+        with mock.patch.object(database.db, "fetch_all", return_value=[{"created_at": t, "sender": "agent"}] * 1001):
+            e = database._envio_mensal(timedelta(hours=-3))
+        self.assertTrue(e["excedeu"])
+        self.assertEqual(e["restantes"], 0)

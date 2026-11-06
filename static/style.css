@@ -4643,3 +4643,20 @@ select option {
 
 /* Acessibilidade: foco visivel para navegacao por teclado */
 :focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+
+/* Dashboard: envio mensal (franquia da Meta) */
+#envio-panel { margin-top: 16px; }
+.envio-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    margin-bottom: 16px;
+}
+.envio-topo { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.envio-estado { font-weight: 600; }
+.envio-barra { height: 10px; background: var(--border); border-radius: 6px; overflow: hidden; margin: 10px 0 6px; }
+.envio-barra > div { height: 100%; border-radius: 6px; }
+.envio-graficos { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.envio-graficos .envio-card { margin-bottom: 0; }
+.envio-legenda { display: flex; justify-content: space-around; font-size: 11px; color: var(--text-muted); }

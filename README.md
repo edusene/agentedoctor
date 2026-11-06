@@ -152,6 +152,7 @@ vazias, o agente responde que a equipe confirma, e **nunca inventa**:
 | `CLINICA_ORIENTACOES` | orientações pré-consulta do consultório |
 | `AGENTE_NOME` | nome da assistente, se houver |
 | `TZ_OFFSET_HORAS` | `-3` (Brasília) |
+| `META_LIMITE_MENSAL` | `1000` (franquia gratuita da Meta; o Dashboard mostra as enviadas no mês contra ela) |
 
 Também é preciso configurar o WhatsApp do consultório (API própria, AutoZap):
 `WHATSAPI_KEY` (chave `sk_live_...`), `WHATSAPI_PHONE_NUMBER_ID`, `WHATSAPI_URL`

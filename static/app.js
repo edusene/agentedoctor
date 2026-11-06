@@ -236,6 +236,65 @@ async function loadDashboard() {
             <div class="stat-label">Não Lidas</div>
         </div>
     `;
+    renderEnvio(stats.envio);
+}
+
+/* Barras em SVG: valores = [{rotulo, n, destaque}] */
+function barrasSvg(valores, { limite = 0, altura = 110 } = {}) {
+    const max = Math.max(1, limite, ...valores.map(v => v.n));
+    const larg = 100 / valores.length;
+    const barras = valores.map((v, i) => {
+        const h = (v.n / max) * (altura - 16);
+        return `<g><title>${v.rotulo}: ${v.n}</title>
+            <rect x="${i * larg + larg * 0.15}%" y="${altura - h}" width="${larg * 0.7}%" height="${h}" rx="2"
+                  fill="${v.destaque ? 'var(--accent)' : 'var(--accent-hover)'}" opacity="${v.destaque ? 1 : 0.55}"/></g>`;
+    }).join('');
+    const linha = limite ? `<line x1="0" x2="100%" y1="${altura - (limite / max) * (altura - 16)}" y2="${altura - (limite / max) * (altura - 16)}" stroke="#ef4444" stroke-dasharray="4 3"/>` : '';
+    return `<svg width="100%" height="${altura}" role="img">${barras}${linha}</svg>`;
+}
+
+function renderEnvio(e) {
+    const el = document.getElementById('envio-panel');
+    if (!e) { el.innerHTML = ''; return; }
+    const pct = Math.min(100, Math.round(e.enviadas / e.limite * 100));
+    const cor = e.excedeu ? '#ef4444' : pct >= 80 ? '#f59e0b' : '#22c55e';
+    const estado = e.excedeu
+        ? `Passou do limite em ${e.enviadas - e.limite} mensagens`
+        : `Faltam ${e.restantes} para o limite`;
+    const previsao = e.previsao > e.limite
+        ? `<span style="color:#f59e0b">No ritmo atual, fecha o mês com ~${e.previsao} (acima do limite).</span>`
+        : `No ritmo atual, fecha o mês com ~${e.previsao}.`;
+    const total = (e.origem.bot + e.origem.equipe) || 1;
+    const dias = e.dias.map(d => ({ rotulo: `dia ${d.dia}`, n: d.enviadas, destaque: d.dia === e.hoje }));
+    const hist = e.historico.map((h, i) => ({ rotulo: h.mes, n: h.enviadas, destaque: i === e.historico.length - 1 }));
+    el.innerHTML = `
+        <div class="envio-card">
+            <div class="envio-topo">
+                <div>
+                    <div class="stat-label">Mensagens enviadas em ${e.mes} (franquia gratuita da Meta)</div>
+                    <div class="stat-value">${e.enviadas} <span class="muted">/ ${e.limite}</span></div>
+                </div>
+                <div class="envio-estado" style="color:${cor}">${estado}</div>
+            </div>
+            <div class="envio-barra"><div style="width:${pct}%;background:${cor}"></div></div>
+            <div class="muted">${pct}% usado. ${previsao}</div>
+        </div>
+        <div class="envio-graficos">
+            <div class="envio-card">
+                <div class="stat-label">Enviadas por dia (${e.mes}) — linha vermelha: limite</div>
+                ${barrasSvg(dias, { altura: 120 })}
+            </div>
+            <div class="envio-card">
+                <div class="stat-label">Enviadas por mês (últimos ${hist.length}) — linha vermelha: limite</div>
+                ${barrasSvg(hist, { limite: e.limite, altura: 120 })}
+                <div class="envio-legenda">${hist.map(h => `<span>${h.rotulo}</span>`).join('')}</div>
+            </div>
+            <div class="envio-card">
+                <div class="stat-label">Quem enviou em ${e.mes}</div>
+                <div class="envio-barra"><div style="width:${Math.round(e.origem.bot / total * 100)}%;background:var(--accent)"></div></div>
+                <div class="muted">Secretária IA: ${e.origem.bot} · Equipe: ${e.origem.equipe}</div>
+            </div>
+        </div>`;
 }
 
 /* ── Conversations ────────────────────────────────────────────────────────── */

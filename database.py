@@ -1036,6 +1036,64 @@ def get_dashboard_stats() -> dict:
         "total_messages": total_messages,
         "unread_messages": unread_messages,
         "messages_today": messages_today,
+        "envio": _envio_mensal(offset),
+    }
+
+
+def _envio_mensal(offset: timedelta, meses: int = 6) -> dict:
+    """Mensagens ENVIADAS (direction='out') por mes, no calendario do consultorio.
+
+    A Meta cobra por mes calendario a partir da franquia gratis (META_LIMITE_MENSAL).
+    So conta o que saiu: recebidas e notas internas ficam de fora.
+    """
+    import os
+    try:
+        limite = int(os.getenv("META_LIMITE_MENSAL", "1000"))
+    except ValueError:
+        limite = 1000
+    agora = datetime.utcnow() + offset
+    ano, mes = agora.year, agora.month
+    # primeiro dia do mes mais antigo exibido, em hora local
+    a, m = ano, mes - (meses - 1)
+    while m < 1:
+        a, m = a - 1, m + 12
+    corte = (datetime(a, m, 1) - offset).isoformat()
+    linhas = db.fetch_all(
+        "SELECT created_at, sender FROM messages WHERE direction='out' AND created_at >= ?", (corte,)
+    )
+    por_mes: dict[tuple, int] = {}
+    por_dia: dict[int, int] = {}
+    origem = {"bot": 0, "equipe": 0}
+    for r in linhas:
+        try:
+            t = datetime.fromisoformat(str(r["created_at"])[:26]) + offset
+        except ValueError:
+            continue
+        por_mes[(t.year, t.month)] = por_mes.get((t.year, t.month), 0) + 1
+        if (t.year, t.month) == (ano, mes):
+            por_dia[t.day] = por_dia.get(t.day, 0) + 1
+            origem["equipe" if r["sender"] == "human" else "bot"] += 1
+    # dias do mes atual
+    prox = datetime(ano + (mes == 12), mes % 12 + 1, 1)
+    dias_no_mes = (prox - datetime(ano, mes, 1)).days
+    enviadas = sum(por_dia.values())
+    historico = []
+    for i in range(meses - 1, -1, -1):
+        a, m = ano, mes - i
+        while m < 1:
+            a, m = a - 1, m + 12
+        historico.append({"mes": f"{m:02d}/{a}", "enviadas": por_mes.get((a, m), 0)})
+    return {
+        "mes": f"{mes:02d}/{ano}",
+        "enviadas": enviadas,
+        "limite": limite,
+        "restantes": max(limite - enviadas, 0),
+        "excedeu": enviadas > limite,
+        "previsao": round(enviadas / agora.day * dias_no_mes),
+        "dias": [{"dia": d, "enviadas": por_dia.get(d, 0)} for d in range(1, dias_no_mes + 1)],
+        "hoje": agora.day,
+        "origem": origem,
+        "historico": historico,
     }
 
 
