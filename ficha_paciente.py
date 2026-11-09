@@ -442,6 +442,33 @@ def limpar_resposta_de_nome(texto: str) -> str:
     return " ".join(_RX_TITULO.sub("", bruto).split())
 
 
+# "Maria Silva, estou com dor na mandibula" (teste de 09/11): nome e queixa juntos
+# sem "sou a". A virgula e obrigatoria e o trecho antes dela nao pode ser queixa.
+_RX_NOME_VIRGULA_QUEIXA = re.compile(
+    rf"(?i)^\s*([{_LETRAS}]+(?:\s+[{_LETRAS}]+){{0,3}})\s*[,;:\-–]\s*"
+    r"((?:estou|to|tô|tenho|sinto|sofro|meu|minha|com)\b.+)$")
+
+
+_NAO_NOME_NA_QUEIXA = {"dor", "dores", "na", "no", "nas", "nos", "ao", "em", "por", "sem", "problema", "dificuldade"}
+
+
+def _nome_e_queixa(texto: str) -> tuple[str, str]:
+    m = _RX_NOME_VIRGULA_QUEIXA.match(texto or "")
+    if not m:
+        return "", ""
+    candidato = m.group(1)
+    if (clinica.normalizar(candidato) in _NAO_E_NOME or clinica.classificar_areas(candidato)
+            or any(clinica.normalizar(p) in _PARADAS_NOME | _NAO_NOME_NA_QUEIXA for p in candidato.split())):
+        return "", ""
+    return _titulo(candidato), m.group(2).strip()
+
+
+def queixa_apos_nome(texto: str) -> str:
+    """"Maria Silva, estou com dor na ATM" -> "Estou com dor na ATM"; "" se nao for esse formato."""
+    resto = _nome_e_queixa(texto)[1]
+    return resto[0].upper() + resto[1:] if resto else ""
+
+
 def nome_de_resposta_direta(texto: str) -> str:
     """Resposta seca à pergunta do nome ("Maria Souza", "é a Maria", "pode me chamar de Bia")."""
     m = _RX_CHAMAR_DE.search(texto or "")
@@ -449,6 +476,9 @@ def nome_de_resposta_direta(texto: str) -> str:
         return _limpar_nome(m.group(1))
     bruto = limpar_resposta_de_nome(texto)
     achado = extrair_nome(bruto)
+    if achado:
+        return achado
+    achado = _nome_e_queixa(bruto)[0]
     if achado:
         return achado
     bruto = re.sub(r"(?i)^(?:[ée]\s+(?:o|a)\s+|[ée]\s+|o\s+|a\s+)", "", bruto)

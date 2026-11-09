@@ -995,6 +995,26 @@ class NomeAntesDoPedido(unittest.TestCase):
         secretaria.decidir(g, "o que é atm?")
         self.assertFalse(g.get("queixa"))
 
+    def test_nome_virgula_queixa_sem_sou_a(self):
+        # Teste de 09/11: "Maria Teste Silva, estou com dor..." perdia nome e queixa.
+        f = fp.nova("5562999999997")
+        f["saudacao_feita"] = True  # como depois do #reset
+        fp.marcar_pergunta(f, "nome")
+        d = secretaria.decidir(f, "Maria Teste Silva, estou com dor na mandibula ao mastigar")
+        self.assertEqual(f["nome"], "Maria Teste Silva")
+        self.assertIn("mandibula", f["queixa"])
+        self.assertEqual(d.confirmacao, "Tudo bem, Maria. Entendido.")
+        # queixa vinda antes da virgula nao vira nome; pedido nao vira queixa
+        g = fp.nova("5562999999996")
+        fp.marcar_pergunta(g, "nome")
+        secretaria.decidir(g, "Dor na ATM, tenho dificuldade de abrir a boca")
+        self.assertFalse(g.get("nome"))
+        h = fp.nova("5562999999995")
+        fp.marcar_pergunta(h, "nome")
+        secretaria.decidir(h, "Maria Silva, preciso de avaliacao")
+        self.assertEqual(h["nome"], "Maria Silva")
+        self.assertFalse(h.get("queixa"))
+
     def test_nome_numa_duvida_e_com_saudacao_na_frente(self):
         for frase in ("Pedro gostaria de saber o valor", "Oi, Pedro gostaria de saber o valor",
                       "Bom dia! Pedro quanto custa a consulta?"):

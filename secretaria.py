@@ -364,6 +364,8 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
     queixa_do_resto = False
     if capturou and ultima == "nome" and not ficha.get("queixa") and texto:
         resto = fp.limpar_queixa(texto)
+        if clinica.normalizar(resto) == clinica.normalizar(texto):
+            resto = fp.queixa_apos_nome(texto) or resto  # "Ana Silva, estou com dor na ATM"
         if (clinica.normalizar(resto) != clinica.normalizar(texto)
                 and fp.capturar_resposta(ficha, "queixa", resto)):
             queixa_do_resto = True
