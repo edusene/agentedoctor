@@ -995,6 +995,23 @@ class NomeAntesDoPedido(unittest.TestCase):
         secretaria.decidir(g, "o que é atm?")
         self.assertFalse(g.get("queixa"))
 
+    def test_so_o_pedido_de_consulta_nao_vira_queixa(self):
+        # Chat de 17/11: "Gostaria de agendar uma consulta com o dr Fabricio" virou a queixa
+        # e, sem area, o paciente recebeu o valor padrao (R$ 300) sem distincao.
+        for frase in ("Gostaria de agendar uma consulta com o dr Fabricio",
+                      "Quero marcar consulta com o Dr. Tadeu por favor."):
+            f = fp.nova("5562999999994")
+            f["nome"] = "Paulo"
+            fp.marcar_pergunta(f, "queixa")
+            secretaria.decidir(f, frase)
+            self.assertFalse(f.get("queixa"), frase)
+            self.assertEqual(f["ultima_pergunta"], "queixa")
+        g = fp.nova("5562999999993")
+        g["nome"] = "Paulo"
+        fp.marcar_pergunta(g, "queixa")
+        secretaria.decidir(g, "Quero marcar consulta porque estou com dor de cabeca forte")
+        self.assertTrue(g.get("queixa"))
+
     def test_nome_virgula_queixa_sem_sou_a(self):
         # Teste de 09/11: "Maria Teste Silva, estou com dor..." perdia nome e queixa.
         f = fp.nova("5562999999997")

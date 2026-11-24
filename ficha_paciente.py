@@ -645,6 +645,15 @@ def sem_conteudo(texto: str) -> bool:
     return not t or bool(_RX_SEM_CONTEUDO.match(t))
 
 
+# "Gostaria de agendar uma consulta com o dr Fabricio" (chat de 17/11): so pedido, sem motivo.
+_PALAVRAS_DO_PEDIDO = {
+    "gostaria", "queria", "quero", "preciso", "desejo", "de", "do", "da", "agendar", "marcar",
+    "uma", "um", "consulta", "avaliacao", "com", "o", "a", "dr", "dra", "doutor", "doutora",
+    "fabricio", "tadeu", "por", "favor", "para", "pra", "eu", "gostaríamos", "poderia", "pode",
+    "horario", "agendamento", "marcacao",
+}
+
+
 def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
     """Grava a resposta à pergunta que o código fez. False = não aproveitável."""
     bruto = (texto or "").strip()
@@ -678,7 +687,8 @@ def capturar_resposta(ficha: dict, campo: str, texto: str) -> bool:
             return False
         # So "quero agendar uma avaliacao": e intencao, nao queixa.
         if (clinica.classificar_intencao(bruto) == "pronto_agendar"
-                and not clinica.classificar_areas(bruto) and len(t.split()) <= 6):
+                and not clinica.classificar_areas(bruto)
+                and (len(t.split()) <= 6 or not set(re.findall(r"\w+", t)) - _PALAVRAS_DO_PEDIDO)):
             return False
         ficha["queixa"] = limpar_queixa(bruto)[:300]
         return True
