@@ -20,7 +20,7 @@ O consultório de cirurgia bucomaxilofacial recebe pacientes pelo WhatsApp. A se
 
 ## Regras de negócio e de segurança
 
-- O agente **nunca** fecha diagnóstico, indica procedimento, interpreta exame, promete resultado, prescreve nem inventa informação. O valor da consulta é sempre informado no fim (pedido do doutor, 26/10): a tabela dele (`TABELA_VALORES`) e, fora dela, `VALOR_PADRAO` (R$ 300). Antes de o paciente escolher o médico, as frases dizem "o doutor" (`clinica.com_medico`).
+- O agente **nunca** fecha diagnóstico, indica procedimento, interpreta exame, promete resultado, prescreve nem inventa informação. O valor da consulta é sempre informado no fim (pedido do doutor, 26/10): a tabela dele (`TABELA_VALORES`) e, fora dela, `VALOR_PADRAO` (R$ 400: sem motivo conhecido vale o maior valor, pedido do doutor em 24/11; ele não tem tabela de procedimentos, o preço de cada procedimento é definido na consulta). Antes de o paciente escolher o médico, as frases dizem "o doutor" (`clinica.com_medico`).
 - Respostas que não podem oscilar ficam **travadas em código**, não no modelo.
 - Foto e documento do paciente **não vão ao modelo**.
 - Dado de paciente é dado de saúde (LGPD): nenhum dado real em teste, log, commit ou grafo. O repositório é **público**.

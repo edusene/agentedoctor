@@ -596,6 +596,7 @@ class Fluxo(unittest.TestCase):
         _, saidas = conversa(["Oi", "Ana", "dor no dente", "Tanto faz", CADASTRO_OK, "terças à tarde",
                               "não", "sim"])
         self.assertIn(clinica.cartao_valor(clinica.VALOR_PADRAO, "Sem preferência"), saidas[-1][2])
+        self.assertEqual(clinica.VALOR_PADRAO, 400)  # doutor, 24/11: sem motivo, o maior valor
 
     def test_pergunta_se_e_robo_tem_resposta_verdadeira(self):
         for pergunta in ["Você é um robô?", "estou falando com uma pessoa de verdade?",
@@ -997,7 +998,7 @@ class NomeAntesDoPedido(unittest.TestCase):
 
     def test_so_o_pedido_de_consulta_nao_vira_queixa(self):
         # Chat de 17/11: "Gostaria de agendar uma consulta com o dr Fabricio" virou a queixa
-        # e, sem area, o paciente recebeu o valor padrao (R$ 300) sem distincao.
+        # e, sem area, o paciente recebeu o valor padrao sem saber o motivo.
         for frase in ("Gostaria de agendar uma consulta com o dr Fabricio",
                       "Quero marcar consulta com o Dr. Tadeu por favor."):
             f = fp.nova("5562999999994")

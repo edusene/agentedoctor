@@ -217,8 +217,9 @@ LOCAL_CONSULTA = "Clínica Omnilux / Av. Lauro Sodré, 2800, Bairro Costa e Silv
 
 # R$ 400: ATM, apneia, ortognática e estéticas. R$ 300: siso, enxerto,
 # lesões e biópsias. O resto (trauma, dor de dente, implante, sem área) recebe
-# VALOR_PADRAO: o doutor pediu (26/10) que o valor sempre seja informado.
-VALOR_PADRAO = 300
+# VALOR_PADRAO: o doutor pediu (26/10) que o valor sempre seja informado e (24/11) que,
+# sem motivo conhecido, seja o maior: melhor dar desconto na consulta do que cobrar a menos.
+VALOR_PADRAO = 400
 _VALOR_POR_AREA = {
     "ortognatica": 400, "mentoplastia": 400, "lift_facial": 400, "lift_cervical": 400,
     "papada": 400,
