@@ -594,7 +594,8 @@ _SIM = _rx(
     r"^(sim|s|ss|isso|isso mesmo|pode|pode sim|pode ser|claro|com certeza|ok|okay|certo|"
     r"correto|confirmo|confirmado|esta certo|ta certo|tudo certo|exato|exatamente|perfeito|"
     r"yes|aham|uhum|beleza|blz|positivo|pode encaminhar|encaminha|manda|certinho|"
-    r"ta certinho|tudo ok|isso ai|confere|pode confirmar|confirma|bora|fechado|sim sim)\b",
+    r"ta certinho|tudo ok|isso ai|confere|pode confirmar|confirma|bora|fechado|sim sim|"
+    r"tudo correto|(esta|ta) (tudo )?(certo|correto|ok|otimo|bom|certinho|perfeito))\b",
 )
 _EMOJI_SIM = {"👍", "👍🏻", "👍🏼", "👍🏽", "👍🏾", "👍🏿", "✅", "👌", "🆗", "✔️", "✔"}
 _NAO = _rx(r"^(nao|n|nop|negativo|nenhum|nenhuma|nada|nunca)\b", r"^(ainda )?nao\b")

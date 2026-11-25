@@ -214,6 +214,10 @@ def decidir(ficha: dict, texto: str, momento: datetime | None = None,
                 d.tipos.append(f"pedir_campo:{campo}")
                 d.partes.append(fp.PERGUNTAS[campo])
                 return fechar()
+        # "RG: 2867882" sem ter dito "não": o dado corrigido entra no resumo (chat de 25/11).
+        if (ultima_c == "confirmacao" and "?" not in texto and not clinica.e_sim(texto)
+                and not clinica.e_nao(texto) and fp.aplicar_correcao(dict(ficha), texto)):
+            ficha["ultima_pergunta"] = "correcao"
         if ficha.get("ultima_pergunta") == "correcao":
             corrigido = fp.aplicar_correcao(ficha, texto)
             aviso = ficha.get("aviso_cadastro", "")

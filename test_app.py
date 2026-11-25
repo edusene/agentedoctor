@@ -312,3 +312,27 @@ class TestEnvioMensal(unittest.TestCase):
             e = database._envio_mensal(timedelta(hours=-3))
         self.assertTrue(e["excedeu"])
         self.assertEqual(e["restantes"], 0)
+
+
+class TestConfirmarMeiaHora(unittest.TestCase):
+    """Painel: confirmar o horario 13h30 (nao so hora cheia)."""
+
+    def setUp(self):
+        self.c = cliente()
+        with self.c.session_transaction() as sessao:
+            sessao["logged_in"] = True
+
+    def _pendente(self, fone):
+        contato = app_mod.database.upsert_contact(fone)
+        conv = app_mod.database.get_or_create_conversation(fone)
+        return app_mod.database.criar_agendamento(contato["id"], conv["id"], fone, "Paciente Teste", "", {})
+
+    def test_confirma_13h30_e_13h(self):
+        for hora, fone, dia in (("13:30", "5562999990001", "2026-12-01"), ("13:00", "5562999990002", "2026-12-02")):
+            ag = self._pendente(fone)
+            agid = ag["id"] if isinstance(ag, dict) else ag
+            with mock.patch.object(app_mod, "_avisar_paciente", return_value=True):
+                r = self.c.post(f"/api/agendamentos/{agid}/confirmar",
+                                json={"data": dia, "hora": hora, "duracao_min": 60, "avisar": True})
+            self.assertEqual(r.status_code, 200, (hora, r.get_json()))
+            self.assertEqual(r.get_json()["agendamento"]["inicio"], f"{dia}T{hora}")

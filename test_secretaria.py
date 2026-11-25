@@ -1013,6 +1013,25 @@ class NomeAntesDoPedido(unittest.TestCase):
         secretaria.decidir(g, "Quero marcar consulta porque estou com dor de cabeca forte")
         self.assertTrue(g.get("queixa"))
 
+    def test_confirmacao_do_resumo_aceita_esta_correto_e_dado_corrigido(self):
+        # Chat de 25/11: "RG: 2867882", "Está correto" e "Pode encaminhar" repetiam o resumo.
+        f = fp.nova("5562999999992")
+        f.update(saudacao_feita=True, nome="Maria", queixa="cirurgia em dezembro", medico="Dr. Fabrício",
+                 nome_completo="Maria Margarete", nascimento="22/05/1962", cpf="26895722220",
+                 rg=fp.NAO_INFORMADO, email="a@b.com", endereco="Av X, 832", cep="66085-315",
+                 disponibilidade="Qualquer dia a partir das 17:00h", saude="Não",
+                 status="aguardando_confirmacao", ultima_pergunta="confirmacao")
+        d = secretaria.decidir(f, "RG: 2867882")
+        self.assertEqual(f["rg"], "2867882")
+        self.assertIn("2867882", " ".join(d.partes))
+        self.assertEqual(f["status"], "aguardando_confirmacao")
+        d = secretaria.decidir(f, "Está correto")
+        self.assertEqual(f["status"], "encaminhado")
+        self.assertTrue(d.encaminhar)
+        for frase in ("Esta tudo certo", "Tá ok", "Pode encaminhar"):
+            self.assertTrue(clinica.e_sim(frase), frase)
+        self.assertFalse(clinica.e_sim("Está errado"))
+
     def test_nome_virgula_queixa_sem_sou_a(self):
         # Teste de 09/11: "Maria Teste Silva, estou com dor..." perdia nome e queixa.
         f = fp.nova("5562999999997")
