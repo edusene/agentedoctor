@@ -25,7 +25,8 @@
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 9000);
   };
-  const voltar = () => chrome.runtime.sendMessage({ tipo: "voltar" });
+  // Volta ao painel e mostra la o resultado (a aba do Simples Dental some da vista).
+  const voltar = (texto, erro) => chrome.runtime.sendMessage({ tipo: "voltar", texto, erro });
 
   const campos = () => [...document.querySelectorAll("mat-form-field")].filter((f) => f.offsetParent);
   const achar = (rotulo) => campos().find((f) => f.innerText.trim().toLowerCase().startsWith(rotulo.toLowerCase()));
@@ -68,7 +69,7 @@
 
   const jaTem = (await buscar(d.nome)).find((n) => norm(n) === norm(d.nome))
     || (d.cpf ? (await buscar(d.cpf.replace(/\D/g, "")))[0] : "");
-  if (jaTem) { aviso("Secretária IA: " + jaTem + " já está cadastrado. Não criei de novo.", true); voltar(); return; }
+  if (jaTem) { const msg = jaTem + " já está cadastrado no Simples Dental. Não criei de novo."; aviso("Secretária IA: " + msg, true); voltar(msg, true); return; }
 
   for (let i = 0; i < 20 && !formAberto(); i++) { clicar("NOVO PACIENTE"); await esperar(500); }
   if (!formAberto()) { aviso("Secretária IA: não consegui abrir Novo paciente.", true); return; }
@@ -96,6 +97,7 @@
   if (!clicar("SALVAR")) { aviso("Preenchi. Clique em SALVAR.", true); return; }
   for (let i = 0; i < 24 && formAberto(); i++) await esperar(500);
   if (formAberto()) { aviso("Não salvou: confira os campos e clique em SALVAR.", true); return; }
-  aviso("Secretária IA: " + d.nome + " cadastrado no Simples Dental.");
-  voltar();
+  const ok = d.nome + " cadastrado no Simples Dental.";
+  aviso("Secretária IA: " + ok);
+  voltar(ok, false);
 })();

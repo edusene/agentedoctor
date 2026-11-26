@@ -13,3 +13,8 @@ window.addEventListener("message", (e) => {
     chrome.runtime.sendMessage({ tipo: "abrir" });
   });
 });
+
+// Resultado do cadastro (cadastrado, ja existia...) volta ate a tela do painel.
+chrome.runtime.onMessage.addListener((m) => {
+  if (m.tipo === "resultado") window.postMessage({ tipo: "agentedoctor-simples-resultado", texto: m.texto, erro: m.erro }, location.origin);
+});

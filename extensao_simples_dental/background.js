@@ -19,6 +19,10 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
       }
     });
   } else if (msg.tipo === "voltar") {
-    chrome.storage.local.get("origem", ({ origem }) => origem && focar(origem.tabId, origem.windowId));
+    chrome.storage.local.get("origem", ({ origem }) => {
+      if (!origem) return;
+      focar(origem.tabId, origem.windowId);
+      chrome.tabs.sendMessage(origem.tabId, { tipo: "resultado", texto: msg.texto, erro: msg.erro }, () => void chrome.runtime.lastError);
+    });
   }
 });
