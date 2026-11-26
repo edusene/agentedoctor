@@ -4681,3 +4681,5 @@ select option {
 .pac-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-gradient); color: #fff; display: grid; place-items: center; font-weight: 700; flex: none; }
 .pac-tabela td { vertical-align: middle; }
 .pac-tabela .table-actions { white-space: nowrap; }
+
+.sd-ok .sd-instalar { display: none !important; }

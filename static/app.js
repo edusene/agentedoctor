@@ -3707,7 +3707,7 @@ async function detalheAgendamento(agId) {
             </div>
             <div class="sd-envio">
                 <button class="btn-simples" onclick="enviarAgendamentoSimples(${a.id})">${ICONE_SIMPLES} Enviar ao Simples Dental</button>
-                <button class="btn-link-sd" onclick="abrirAtalhoSimplesDental()">Como instalar a extensão</button>
+                <button class="btn-link-sd sd-instalar" onclick="abrirAtalhoSimplesDental()">Como instalar a extensão</button>
             </div>
         </div>`;
     document.getElementById('modal-overlay').style.display = 'flex';
@@ -3734,6 +3734,8 @@ window.addEventListener('message', (e) => {
 });
 
 const SD_EXTENSAO_VERSAO = '1.1.1';
+// Com a extensao certa instalada, o painel esconde tudo o que fala em instalar.
+document.documentElement.classList.toggle('sd-ok', document.documentElement.dataset.extensaoSd === SD_EXTENSAO_VERSAO);
 
 async function enviarSimplesDental(dados) {
     const versao = document.documentElement.dataset.extensaoSd;
