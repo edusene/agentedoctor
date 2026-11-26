@@ -3,6 +3,11 @@
   "name": "Secretária IA: cadastro no Simples Dental",
   "version": "1.1.1",
   "description": "Preenche Novo paciente no Simples Dental com os dados enviados pelo painel da Secretária IA. Nao salva sozinha.",
+  "icons": { "16": "icones/icone16.png", "32": "icones/icone32.png", "48": "icones/icone48.png", "128": "icones/icone128.png" },
+  "action": {
+    "default_title": "Secretária IA: cadastro no Simples Dental",
+    "default_icon": { "16": "icones/icone16.png", "32": "icones/icone32.png" }
+  },
   "permissions": ["storage", "tabs"],
   "host_permissions": ["https://app.simplesdental.com/*"],
   "background": { "service_worker": "background.js" },
