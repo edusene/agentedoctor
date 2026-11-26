@@ -4,6 +4,11 @@
 document.documentElement.dataset.extensaoSd = "1";
 window.addEventListener("message", (e) => {
   if (e.source !== window || !e.data || e.data.tipo !== "agentedoctor-simples") return;
+  // Depois de atualizar a extensao, esta copia fica sem ligacao com ela: so F5 resolve.
+  if (!chrome.runtime || !chrome.runtime.id) {
+    window.postMessage({ tipo: "agentedoctor-simples-recarregar" }, location.origin);
+    return;
+  }
   chrome.storage.local.set({ pendente: { dados: e.data.dados, quando: Date.now() } }, () => {
     chrome.runtime.sendMessage({ tipo: "abrir" });
   });

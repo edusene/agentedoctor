@@ -3726,6 +3726,11 @@ function dadosSimplesDental(nome, phone, f) {
     };
 }
 
+window.addEventListener('message', (e) => {
+    if (e.source === window && e.data && e.data.tipo === 'agentedoctor-simples-recarregar')
+        toast('A extensão foi atualizada: recarregue este painel (F5) e envie de novo.', 'error');
+});
+
 async function enviarSimplesDental(dados) {
     if (document.documentElement.dataset.extensaoSd) {
         // A extensao abre o Simples Dental e preenche; a secretaria so confere e salva.
