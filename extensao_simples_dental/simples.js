@@ -10,6 +10,14 @@
   const d = pendente.dados;
   const norm = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 
+  // O WhatsApp entrega celular antigo sem o 9 (DDD + 8 digitos); o Simples Dental
+  // exige o nono digito. Fixo comeca em 2 a 5 e fica como esta.
+  const celularComNove = (bruto) => {
+    let n = (bruto || "").replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
+    if (/^\d{2}[6-9]\d{7}$/.test(n)) n = n.slice(0, 2) + "9" + n.slice(2);
+    return n;
+  };
+
   const aviso = (texto, erro) => {
     const el = document.createElement("div");
     el.textContent = texto;
@@ -72,7 +80,7 @@
   p("Data de nascimento", d.nascimento);
   p("CPF", d.cpf);
   p("RG", d.rg);
-  p("Celular do paciente", (d.celular || "").replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, ""));
+  p("Celular do paciente", celularComNove(d.celular));
   p("Observação", d.observacao);
   clicar("INFORMAÇÕES ADICIONAIS"); await esperar(400);
   p("E-mail", d.email);
