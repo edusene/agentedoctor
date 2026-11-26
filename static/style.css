@@ -4659,3 +4659,25 @@ select option {
 .envio-barra > div { height: 100%; border-radius: 6px; }
 .envio-graficos { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
 .envio-graficos .envio-card { margin-bottom: 0; }
+
+/* ── Simples Dental e aba Pacientes ─────────────────────────────────────── */
+.btn-simples {
+    display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border: 0;
+    border-radius: var(--radius-md); background: linear-gradient(135deg, #16a34a, #22c55e);
+    color: #fff; font: inherit; font-weight: 600; font-size: 0.9rem; cursor: pointer; text-decoration: none;
+    box-shadow: 0 4px 14px rgba(34,197,94,0.35); transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.btn-simples:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(34,197,94,0.5); }
+.btn-simples:active { transform: scale(0.98); }
+.btn-simples-sm { padding: 6px 12px; font-size: 0.8rem; box-shadow: none; }
+.btn-link-sd { background: none; border: 0; color: var(--accent-hover); font: inherit; font-size: 0.85rem; cursor: pointer; text-decoration: underline; }
+.sd-envio { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.sd-passos { margin: 0 0 8px 18px; padding: 0; line-height: 1.6; color: var(--text); }
+.sd-passos li { margin-bottom: 8px; }
+.pac-busca { padding: 12px 14px 4px; }
+.pac-busca input { width: 100%; padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); font: inherit; }
+.pac-busca input:focus { outline: none; border-color: var(--border-focus); box-shadow: var(--shadow-glow); }
+.pac-nome { display: flex; align-items: center; gap: 10px; }
+.pac-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-gradient); color: #fff; display: grid; place-items: center; font-weight: 700; flex: none; }
+.pac-tabela td { vertical-align: middle; }
+.pac-tabela .table-actions { white-space: nowrap; }

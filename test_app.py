@@ -336,3 +336,22 @@ class TestConfirmarMeiaHora(unittest.TestCase):
                                 json={"data": dia, "hora": hora, "duracao_min": 60, "avisar": True})
             self.assertEqual(r.status_code, 200, (hora, r.get_json()))
             self.assertEqual(r.get_json()["agendamento"]["inicio"], f"{dia}T{hora}")
+
+
+class TestPacientes(unittest.TestCase):
+    """Aba Pacientes: contato + cadastro do ultimo agendamento, sem a ficha de saude."""
+
+    def test_lista_cadastro_sem_saude(self):
+        c = cliente()
+        with c.session_transaction() as sessao:
+            sessao["logged_in"] = True
+        fone = "5562999990077"
+        contato = app_mod.database.upsert_contact(fone, name="Ana Teste")
+        conv = app_mod.database.get_or_create_conversation(fone)
+        app_mod.database.criar_agendamento(contato["id"], conv["id"], fone, "Ana Teste", "",
+                                           {"nome_completo": "Ana Teste Silva", "cpf": "000.000.000-00",
+                                            "saude": "informacao reservada"})
+        p = next(x for x in c.get("/api/pacientes").get_json() if x["phone"] == fone)
+        self.assertEqual(p["ficha"]["nome_completo"], "Ana Teste Silva")
+        self.assertEqual(p["ficha"]["cpf"], "000.000.000-00")
+        self.assertNotIn("saude", p["ficha"])

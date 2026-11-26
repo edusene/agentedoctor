@@ -131,7 +131,7 @@ rodada 25 vezes tem de dar exatamente as mesmas respostas.
 
 ## Cadastro no Simples Dental (semiautomático)
 
-No detalhe do agendamento confirmado, **Copiar para o Simples Dental** põe os dados na área de transferência. O atalho de favoritos (`static/simples_dental.js`, arrastado do próprio painel para a barra do Chrome) preenche "Novo paciente" no Simples Dental já logado; a secretária confere e salva. Não há senha nem chamada de servidor. O CEP preenche rua, bairro, cidade e estado; sexo e dados do responsável ficam em branco (o roteiro do doutor não pergunta).
+Na aba **Pacientes** (lista no estilo do Simples Dental, com busca por nome, CPF ou celular), no detalhe do agendamento e na própria confirmação do horário (caixa marcada por padrão), **Enviar ao Simples Dental** copia o cadastro e abre o Simples Dental. O atalho de favoritos (`static/simples_dental.js`, arrastado do painel, botão "Atalho do Simples Dental") preenche "Novo paciente" no Simples Dental já logado; a secretária confere e salva. Não há senha nem chamada de servidor. O CEP preenche rua, bairro, cidade e estado; sexo e dados do responsável ficam em branco (o roteiro do doutor não pergunta).
 
 ## Documentação
 

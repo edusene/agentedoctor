@@ -213,7 +213,7 @@ async function loadDashboard() {
         <div class="stat-card">
             <div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
             <div class="stat-value">${stats.total_contacts}</div>
-            <div class="stat-label">Contatos</div>
+            <div class="stat-label">Pacientes</div>
         </div>
         <div class="stat-card">
             <div class="stat-icon"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
@@ -1542,39 +1542,75 @@ function markTempMsgSent(tempId) {
 
 /* ── Contacts ─────────────────────────────────────────────────────────────── */
 async function loadContacts() {
-    document.getElementById('contacts-list').innerHTML = skeletonRows(5);
-    const contacts = await api('/api/contacts');
-    if (!contacts) return;
-    if (contacts.length === 0) {
-        document.getElementById('contacts-list').innerHTML = '<div class="empty-state">Nenhum contato</div>';
+    const lista = document.getElementById('contacts-list');
+    lista.innerHTML = skeletonRows(5);
+    const pacientes = await api('/api/pacientes');
+    if (!pacientes) return;
+    pacientesCache = pacientes;
+    if (pacientes.length === 0) {
+        lista.innerHTML = '<div class="empty-state">Nenhum paciente ainda</div>';
         return;
     }
-    document.getElementById('contacts-list').innerHTML = `
+    lista.innerHTML = `
+        <div class="pac-busca"><input type="search" id="pac-busca" placeholder="Digite o nome, CPF ou celular do paciente..." oninput="filtrarPacientes()" aria-label="Buscar paciente"></div>
         <div class="contacts-bulk-bar" id="contacts-bulk-bar" style="display:none">
             <span id="contacts-selected-count">0 selecionados</span>
             <button class="btn-sm btn-danger" onclick="bulkDeleteContacts()">Excluir selecionados</button>
         </div>
-        <table>
+        <table class="pac-tabela">
             <thead><tr>
                 <th style="width:36px"><input type="checkbox" id="contacts-select-all" onchange="toggleAllContacts(this)"></th>
-                <th>Telefone</th><th>Nome</th><th>Email</th><th>Modo</th><th>Ações</th>
+                <th>Nome</th><th>Idade</th><th>CPF</th><th>Celular</th><th>Consulta</th><th>Ações</th>
             </tr></thead>
-            <tbody>
-            ${contacts.map(c => `
-                <tr>
-                    <td><input type="checkbox" class="contact-checkbox" value="${c.id}" onchange="updateBulkBar()"></td>
-                    <td>${esc(c.phone)}</td>
-                    <td>${esc(c.name || '-')}</td>
-                    <td>${esc(c.email || '-')}</td>
-                    <td><span class="auto-badge ${c.auto_mode ? 'auto-on' : 'auto-off'}">${c.auto_mode ? 'Auto' : 'Humano'}</span></td>
-                    <td class="table-actions">
-                        <button class="btn-sm btn-secondary" onclick="editContact(${c.id})">Editar</button>
-                        <button class="btn-sm btn-danger" onclick="deleteContact(${c.id})">Excluir</button>
-                    </td>
-                </tr>
-            `).join('')}
-            </tbody>
-        </table>`;
+            <tbody id="pac-corpo"></tbody>
+        </table>
+        <div class="empty-state" id="pac-vazio" style="display:none">Nenhum paciente encontrado</div>`;
+    filtrarPacientes();
+}
+
+let pacientesCache = [];
+
+function idadeDe(nascimento) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((nascimento || '').trim());
+    if (!m) return '';
+    const hoje = new Date();
+    let anos = hoje.getFullYear() - Number(m[3]);
+    if (hoje.getMonth() + 1 < Number(m[2]) || (hoje.getMonth() + 1 === Number(m[2]) && hoje.getDate() < Number(m[1]))) anos--;
+    return anos >= 0 && anos < 130 ? anos + ' anos' : '';
+}
+
+function filtrarPacientes() {
+    const q = (document.getElementById('pac-busca')?.value || '').trim().toLowerCase();
+    const digitos = q.replace(/\D/g, '');
+    const achados = pacientesCache.filter(p => !q
+        || (p.ficha.nome_completo || p.name || '').toLowerCase().includes(q)
+        || (digitos && ((p.ficha.cpf || '').replace(/\D/g, '').includes(digitos) || (p.phone || '').replace(/\D/g, '').includes(digitos))));
+    document.getElementById('pac-vazio').style.display = achados.length ? 'none' : '';
+    document.getElementById('pac-corpo').innerHTML = achados.map(p => {
+        const nome = p.ficha.nome_completo || p.name || 'Sem nome';
+        const consulta = p.ag_status === 'confirmado' && p.ag_inicio ? quandoAgendamento(p.ag_inicio)
+            : p.ag_status === 'pendente' ? 'Aguardando confirmação' : '-';
+        return `
+        <tr>
+            <td><input type="checkbox" class="contact-checkbox" value="${p.id}" onchange="updateBulkBar()"></td>
+            <td><div class="pac-nome"><span class="pac-avatar">${esc(nome.charAt(0).toUpperCase())}</span>
+                <div><strong>${esc(nome)}</strong><div class="muted">${esc(p.ficha.email || p.email || '')}</div></div></div></td>
+            <td>${esc(idadeDe(p.ficha.nascimento) || '-')}</td>
+            <td>${esc(p.ficha.cpf || '-')}</td>
+            <td>${esc(p.phone)}</td>
+            <td>${esc(consulta)}</td>
+            <td class="table-actions">
+                <button class="btn-simples btn-simples-sm" title="Copia o cadastro e abre o Simples Dental" onclick="enviarPacienteSimples(${p.id})">${ICONE_SIMPLES} Simples Dental</button>
+                <button class="btn-sm btn-secondary" onclick="editContact(${p.id})">Editar</button>
+                <button class="btn-sm btn-danger" onclick="deleteContact(${p.id})">Excluir</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function enviarPacienteSimples(id) {
+    const p = pacientesCache.find(x => x.id === id);
+    if (p) enviarSimplesDental(dadosSimplesDental(p.name, p.phone, p.ficha));
 }
 
 function toggleAllContacts(master) {
@@ -1620,7 +1656,7 @@ async function bulkDeleteContacts() {
 }
 
 function showContactForm(contact = null) {
-    const title = contact ? 'Editar Contato' : 'Novo Contato';
+    const title = contact ? 'Editar Paciente' : 'Novo Paciente';
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = `
         <form onsubmit="saveContact(event, ${contact?.id || 'null'})">
@@ -1643,10 +1679,10 @@ async function saveContact(e, id) {
     setBtnLoading(btn, true, 'Salvando...');
     if (id) {
         await api(`/api/contacts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
-        toast('Contato atualizado', 'success');
+        toast('Paciente atualizado', 'success');
     } else {
         await api('/api/contacts', { method: 'POST', body: JSON.stringify(data) });
-        toast('Contato criado', 'success');
+        toast('Paciente criado', 'success');
     }
     setBtnLoading(btn, false);
     closeModal();
@@ -1663,7 +1699,7 @@ async function editContact(id) {
 async function deleteContact(id) {
     if (!confirm('Excluir este contato?')) return;
     await api(`/api/contacts/${id}`, { method: 'DELETE' });
-    toast('Contato excluído', 'success');
+    toast('Paciente excluído', 'success');
     loadContacts();
 }
 
@@ -3330,6 +3366,8 @@ function abrirConversaAgendamento(convId) {
     selectConversation(convId);
 }
 
+let agParaSimples = null;  // cadastro do pedido aberto no formulario de confirmacao
+
 async function formHorarioAgendamento(agId, remarcar) {
     const a = await api(`/api/agendamentos/${agId}`);
     if (!a || a.error) { toast('Agendamento não encontrado', 'error'); return; }
@@ -3340,6 +3378,7 @@ async function formHorarioAgendamento(agId, remarcar) {
     const opcoes = [30, 45, 60, 90, 120];
     if (!opcoes.includes(Number(duracao))) opcoes.push(Number(duracao));
     const disp = (a.ficha && a.ficha.disponibilidade) || '';
+    agParaSimples = dadosSimplesDental(a.nome, a.phone, a.ficha);
     document.getElementById('modal-title').textContent = remarcar ? 'Remarcar avaliação' : 'Confirmar horário';
     document.getElementById('modal-body').innerHTML = `
         <form onsubmit="salvarHorarioAgendamento(event, ${agId}, ${remarcar}, false)">
@@ -3354,6 +3393,7 @@ async function formHorarioAgendamento(agId, remarcar) {
             </div>
             <div class="form-group"><label>Observações (opcional)</label><textarea name="observacoes" rows="2">${esc(a.observacoes || '')}</textarea></div>
             <label class="ag-check"><input type="checkbox" name="avisar" checked> Avisar o paciente no WhatsApp</label>
+            ${remarcar ? '' : '<label class="ag-check"><input type="checkbox" name="simples" checked> Enviar o cadastro ao Simples Dental depois de confirmar</label>'}
             <div id="ag-conflito"></div>
             <button type="submit" class="btn-primary">${remarcar ? 'Salvar novo horário' : 'Confirmar agendamento'}</button>
         </form>`;
@@ -3383,6 +3423,7 @@ async function salvarHorarioAgendamento(e, agId, remarcar, forcar) {
     }
     if (!r || r.error) { toast(friendlyError(r?.error || 'Erro ao salvar'), 'error'); return; }
     closeModal();
+    if (!remarcar && f.get('simples') === 'on' && agParaSimples) enviarSimplesDental(agParaSimples);
     let msg = remarcar ? 'Avaliação remarcada' : 'Agendamento confirmado';
     if (corpo.avisar) msg += r.avisado ? ' e paciente avisado' : ' (o aviso no WhatsApp não saiu)';
     toast(msg, r.avisado || !corpo.avisar ? 'success' : 'error');
@@ -3664,39 +3705,56 @@ async function detalheAgendamento(agId) {
                 <button class="btn-secondary btn-sm ag-cancelar" onclick="cancelarAgendamento(${a.id}, true)">Cancelar</button>
                 <button class="btn-primary btn-sm" onclick="formHorarioAgendamento(${a.id}, true)">Remarcar</button>
             </div>
-            <div class="ag-acoes">
-                <button class="btn-secondary btn-sm" onclick="copiarParaSimplesDental(${a.id})">Copiar para o Simples Dental</button>
-                <a class="btn-secondary btn-sm" id="sd-atalho" href="#" onclick="return false" title="Arraste para a barra de favoritos">Atalho: Preencher Simples Dental</a>
+            <div class="sd-envio">
+                <button class="btn-simples" onclick="enviarAgendamentoSimples(${a.id})">${ICONE_SIMPLES} Enviar ao Simples Dental</button>
+                <button class="btn-link-sd" onclick="abrirAtalhoSimplesDental()">Como funciona / instalar atalho</button>
             </div>
-            <p class="muted">1) Copie os dados. 2) Entre no Simples Dental e clique no atalho da barra de favoritos. 3) Confira e clique em Salvar. Primeira vez: arraste o botão "Atalho" para a barra de favoritos do Chrome.</p>
         </div>`;
     document.getElementById('modal-overlay').style.display = 'flex';
-    montarAtalhoSimplesDental();
 }
 
-// Dados na ordem do Simples Dental; o atalho (static/simples_dental.js) preenche.
-async function copiarParaSimplesDental(agId) {
-    const a = await api(`/api/agendamentos/${agId}`);
-    if (!a || a.error) { toast('Agendamento não encontrado', 'error'); return; }
-    const f = a.ficha || {};
-    const dados = {
-        agentedoctor: 1, nome: f.nome_completo || a.nome || '', nascimento: f.nascimento || '',
-        cpf: f.cpf || '', rg: f.rg || '', celular: a.phone || '', email: f.email || '',
+// ── Simples Dental ───────────────────────────────────────────────────────────
+// "Enviar" copia o cadastro e abre o Simples Dental; o atalho de favoritos
+// (static/simples_dental.js) preenche "Novo paciente" e a secretaria salva.
+const SIMPLES_DENTAL_URL = 'https://app.simplesdental.com/simples/pacientes';
+const ICONE_SIMPLES = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v10"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>';
+
+function dadosSimplesDental(nome, phone, f) {
+    f = f || {};
+    return {
+        agentedoctor: 1, nome: f.nome_completo || nome || '', nascimento: f.nascimento || '',
+        cpf: f.cpf || '', rg: f.rg || '', celular: phone || '', email: f.email || '',
         cep: f.cep || '', endereco: f.endereco || '', observacao: f.queixa ? 'Queixa: ' + f.queixa : '',
     };
-    try {
-        await navigator.clipboard.writeText(JSON.stringify(dados));
-        toast('Dados copiados. Abra o Simples Dental e use o atalho.', 'success');
-    } catch (e) { toast('O navegador não deixou copiar', 'error'); }
 }
 
-async function montarAtalhoSimplesDental() {
-    const link = document.getElementById('sd-atalho');
-    if (!link) return;
+async function enviarSimplesDental(dados) {
     try {
-        const js = await (await fetch('/static/simples_dental.js')).text();
-        link.href = 'javascript:' + encodeURIComponent(js);
-    } catch (e) { link.style.display = 'none'; }
+        await navigator.clipboard.writeText(JSON.stringify(dados));
+    } catch (e) { toast('O navegador não deixou copiar os dados', 'error'); return; }
+    window.open(SIMPLES_DENTAL_URL, 'simplesdental');
+    toast('Dados copiados. No Simples Dental, clique no atalho "Preencher Simples Dental".', 'success');
+}
+
+async function enviarAgendamentoSimples(agId) {
+    const a = await api(`/api/agendamentos/${agId}`);
+    if (!a || a.error) { toast('Agendamento não encontrado', 'error'); return; }
+    enviarSimplesDental(dadosSimplesDental(a.nome, a.phone, a.ficha));
+}
+
+async function abrirAtalhoSimplesDental() {
+    let href = '#';
+    try { href = 'javascript:' + encodeURIComponent(await (await fetch('/static/simples_dental.js')).text()); } catch (e) { /* sem atalho */ }
+    document.getElementById('modal-title').textContent = 'Atalho do Simples Dental';
+    document.getElementById('modal-body').innerHTML = `
+        <ol class="sd-passos">
+            <li><strong>Uma vez por computador:</strong> arraste o botão abaixo para a barra de favoritos do Chrome (Ctrl+Shift+B mostra a barra).</li>
+            <li>Clique em <strong>Enviar ao Simples Dental</strong> no paciente. Os dados são copiados e o Simples Dental abre.</li>
+            <li>Já logado no Simples Dental, clique no favorito <strong>Preencher Simples Dental</strong> e permita ler a área de transferência.</li>
+            <li>Confira o formulário e clique em <strong>Salvar</strong>. O atalho nunca salva sozinho.</li>
+        </ol>
+        <div class="sd-envio"><a class="btn-simples" href="${href}" onclick="return false" title="Arraste para a barra de favoritos">${ICONE_SIMPLES} Preencher Simples Dental</a></div>`;
+    document.getElementById('modal-overlay').style.display = 'flex';
 }
 
 async function salvarDuracaoPadrao(valor) {

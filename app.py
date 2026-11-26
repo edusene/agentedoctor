@@ -2335,6 +2335,12 @@ def api_contacts_list():
     return jsonify(database.list_contacts(limit=limit, offset=offset))
 
 
+@app.get("/api/pacientes")
+@login_required
+def api_pacientes_list():
+    return jsonify(database.listar_pacientes())
+
+
 @app.post("/api/contacts")
 @login_required
 def api_contacts_create():

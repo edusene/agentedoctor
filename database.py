@@ -486,6 +486,29 @@ def list_contacts(limit: int = 100, offset: int = 0) -> list[dict]:
     )
 
 
+_FICHA_NA_LISTA = ("nome_completo", "nascimento", "cpf", "rg", "email", "cep", "endereco", "queixa")
+
+
+def listar_pacientes(limite: int = 500) -> list[dict]:
+    """Contatos com o cadastro do ultimo agendamento (aba Pacientes). So os
+    campos do cadastro saem daqui: a ficha de saude fica de fora da lista."""
+    ultimo = {}
+    for ag in listar_agendamentos():
+        if ag.get("status") != "cancelado":
+            ultimo[ag["phone"]] = ag  # a lista vem por data: o ultimo da fila e o mais recente
+    pacientes = []
+    for c in list_contacts(limit=limite):
+        ag = ultimo.get(c["phone"]) or {}
+        ficha = ag.get("ficha") or {}
+        pacientes.append({
+            "id": c["id"], "phone": c["phone"], "name": c.get("name") or "", "email": c.get("email") or "",
+            "auto_mode": c.get("auto_mode"), "ag_id": ag.get("id"), "ag_status": ag.get("status", ""),
+            "ag_inicio": ag.get("inicio") or "",
+            "ficha": {k: ficha.get(k) or "" for k in _FICHA_NA_LISTA},
+        })
+    return pacientes
+
+
 def update_contact(contact_id: int, **fields: Any) -> None:
     allowed = ("name", "email", "company", "notes", "avatar_url", "avatar_color", "assigned_to", "auto_mode", "crm_status", "last_interaction_at")
     sets = []
