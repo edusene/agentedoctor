@@ -3664,8 +3664,39 @@ async function detalheAgendamento(agId) {
                 <button class="btn-secondary btn-sm ag-cancelar" onclick="cancelarAgendamento(${a.id}, true)">Cancelar</button>
                 <button class="btn-primary btn-sm" onclick="formHorarioAgendamento(${a.id}, true)">Remarcar</button>
             </div>
+            <div class="ag-acoes">
+                <button class="btn-secondary btn-sm" onclick="copiarParaSimplesDental(${a.id})">Copiar para o Simples Dental</button>
+                <a class="btn-secondary btn-sm" id="sd-atalho" href="#" onclick="return false" title="Arraste para a barra de favoritos">Atalho: Preencher Simples Dental</a>
+            </div>
+            <p class="muted">1) Copie os dados. 2) Entre no Simples Dental e clique no atalho da barra de favoritos. 3) Confira e clique em Salvar. Primeira vez: arraste o botão "Atalho" para a barra de favoritos do Chrome.</p>
         </div>`;
     document.getElementById('modal-overlay').style.display = 'flex';
+    montarAtalhoSimplesDental();
+}
+
+// Dados na ordem do Simples Dental; o atalho (static/simples_dental.js) preenche.
+async function copiarParaSimplesDental(agId) {
+    const a = await api(`/api/agendamentos/${agId}`);
+    if (!a || a.error) { toast('Agendamento não encontrado', 'error'); return; }
+    const f = a.ficha || {};
+    const dados = {
+        agentedoctor: 1, nome: f.nome_completo || a.nome || '', nascimento: f.nascimento || '',
+        cpf: f.cpf || '', rg: f.rg || '', celular: a.phone || '', email: f.email || '',
+        cep: f.cep || '', endereco: f.endereco || '', observacao: f.queixa ? 'Queixa: ' + f.queixa : '',
+    };
+    try {
+        await navigator.clipboard.writeText(JSON.stringify(dados));
+        toast('Dados copiados. Abra o Simples Dental e use o atalho.', 'success');
+    } catch (e) { toast('O navegador não deixou copiar', 'error'); }
+}
+
+async function montarAtalhoSimplesDental() {
+    const link = document.getElementById('sd-atalho');
+    if (!link) return;
+    try {
+        const js = await (await fetch('/static/simples_dental.js')).text();
+        link.href = 'javascript:' + encodeURIComponent(js);
+    } catch (e) { link.style.display = 'none'; }
 }
 
 async function salvarDuracaoPadrao(valor) {

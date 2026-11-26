@@ -129,6 +129,10 @@ emergências, cada resposta travada, a conferência das respostas do modelo, o
 fluxo completo até o encaminhamento e a ausência de oscilação: a mesma conversa
 rodada 25 vezes tem de dar exatamente as mesmas respostas.
 
+## Cadastro no Simples Dental (semiautomático)
+
+No detalhe do agendamento confirmado, **Copiar para o Simples Dental** põe os dados na área de transferência. O atalho de favoritos (`static/simples_dental.js`, arrastado do próprio painel para a barra do Chrome) preenche "Novo paciente" no Simples Dental já logado; a secretária confere e salva. Não há senha nem chamada de servidor. O CEP preenche rua, bairro, cidade e estado; sexo e dados do responsável ficam em branco (o roteiro do doutor não pergunta).
+
 ## Documentação
 
 - [PRODUCT.md](PRODUCT.md) escopo e critérios · [AGENTS.md](AGENTS.md) instruções para agentes (`CLAUDE.md` as importa)
