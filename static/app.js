@@ -3393,7 +3393,9 @@ async function formHorarioAgendamento(agId, remarcar) {
             </div>
             <div class="form-group"><label>Observações (opcional)</label><textarea name="observacoes" rows="2">${esc(a.observacoes || '')}</textarea></div>
             <label class="ag-check"><input type="checkbox" name="avisar" checked> Avisar o paciente no WhatsApp</label>
-            ${remarcar ? '' : '<label class="ag-check"><input type="checkbox" name="simples" checked> Enviar o cadastro ao Simples Dental depois de confirmar</label>'}
+            ${remarcar ? '' : (document.documentElement.classList.contains('sd-ok')
+                ? '<label class="ag-check"><input type="checkbox" name="simples" checked> Enviar o cadastro ao Simples Dental depois de confirmar</label>'
+                : '<p class="ag-aviso-sd">Para enviar o cadastro ao Simples Dental ao confirmar, <a class="btn-link-sd" href="/extensao-simples-dental.zip" download>baixe a extensão</a> e instale (os passos estão na aba Pacientes, botão &quot;Extensão do Simples Dental&quot;).</p>')}
             <div id="ag-conflito"></div>
             <button type="submit" class="btn-primary">${remarcar ? 'Salvar novo horário' : 'Confirmar agendamento'}</button>
         </form>`;
