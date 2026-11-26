@@ -3735,7 +3735,7 @@ window.addEventListener('message', (e) => {
         toast(e.data.texto, e.data.erro ? 'error' : 'success');
 });
 
-const SD_EXTENSAO_VERSAO = '1.1.1';
+const SD_EXTENSAO_VERSAO = '1.2.0';
 // Com a extensao certa instalada, o painel esconde tudo o que fala em instalar.
 document.documentElement.classList.toggle('sd-ok', document.documentElement.dataset.extensaoSd === SD_EXTENSAO_VERSAO);
 
