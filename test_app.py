@@ -355,3 +355,20 @@ class TestPacientes(unittest.TestCase):
         self.assertEqual(p["ficha"]["nome_completo"], "Ana Teste Silva")
         self.assertEqual(p["ficha"]["cpf"], "000.000.000-00")
         self.assertNotIn("saude", p["ficha"])
+
+
+class TestExtensaoZip(unittest.TestCase):
+    """Painel serve a extensao do Chrome compactada (so para quem esta logado)."""
+
+    def test_zip_tem_manifest_e_exige_login(self):
+        c = cliente()
+        self.assertNotEqual(c.get("/extensao-simples-dental.zip").status_code, 200)
+        with c.session_transaction() as sessao:
+            sessao["logged_in"] = True
+        r = c.get("/extensao-simples-dental.zip")
+        self.assertEqual(r.status_code, 200)
+        import io
+        import zipfile
+        nomes = zipfile.ZipFile(io.BytesIO(r.data)).namelist()
+        self.assertIn("extensao_simples_dental/manifest.json", nomes)
+        self.assertIn("extensao_simples_dental/simples.js", nomes)

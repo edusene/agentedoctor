@@ -15,6 +15,8 @@ import hmac
 import hashlib
 import json
 import re as _re_mod
+import io
+import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -2333,6 +2335,20 @@ def api_contacts_list():
     limit = min(int(request.args.get("limit", "100")), 500)
     offset = max(int(request.args.get("offset", "0")), 0)
     return jsonify(database.list_contacts(limit=limit, offset=offset))
+
+
+@app.get("/extensao-simples-dental.zip")
+@login_required
+def baixar_extensao_simples_dental():
+    """ZIP da extensao do Chrome (pasta extensao_simples_dental/), para quem nao tem a pasta."""
+    pasta = Path(__file__).parent / "extensao_simples_dental"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for arq in sorted(pasta.rglob("*")):
+            if arq.is_file() and "__pycache__" not in arq.parts:
+                z.write(arq, Path("extensao_simples_dental") / arq.relative_to(pasta))
+    return Response(buf.getvalue(), mimetype="application/zip", headers={
+        "Content-Disposition": "attachment; filename=extensao_simples_dental.zip"})
 
 
 @app.get("/api/pacientes")

@@ -3759,16 +3759,18 @@ async function enviarAgendamentoSimples(agId) {
 }
 
 function abrirAtalhoSimplesDental() {
-    const ativa = !!document.documentElement.dataset.extensaoSd;
+    const ativa = document.documentElement.dataset.extensaoSd === SD_EXTENSAO_VERSAO;
     document.getElementById('modal-title').textContent = 'Extensão do Simples Dental';
     document.getElementById('modal-body').innerHTML = `
         <p>${ativa ? '<strong>Extensão instalada neste navegador.</strong> Clique em Simples Dental e o cadastro é preenchido sozinho; você confere e clica em Salvar.' : 'Instale uma vez em cada computador que vai enviar cadastros:'}</p>
         ${ativa ? '' : `<ol class="sd-passos">
-            <li>Copie a pasta <code>extensao_simples_dental</code> do projeto para o computador.</li>
+            <li><a class="btn-simples btn-simples-sm" href="/extensao-simples-dental.zip" download>Baixar a extensão (.zip)</a></li>
+            <li>Descompacte o arquivo em uma pasta que você não vá apagar (por exemplo, em Documentos).</li>
             <li>No Chrome, abra <code>chrome://extensions</code> e ligue o <strong>Modo do desenvolvedor</strong>.</li>
-            <li>Clique em <strong>Carregar sem compactação</strong> e escolha a pasta.</li>
+            <li>Clique em <strong>Carregar sem compactação</strong> e escolha a pasta <code>extensao_simples_dental</code>.</li>
             <li>Entre no Simples Dental neste Chrome e recarregue este painel (F5).</li>
-        </ol>`}`;
+        </ol>
+        <p class="muted">Para atualizar a extensão, baixe o arquivo de novo, substitua a pasta e clique em atualizar em <code>chrome://extensions</code>.</p>`}`;
     document.getElementById('modal-overlay').style.display = 'flex';
 }
 
