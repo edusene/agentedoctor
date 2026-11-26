@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Secretária IA: cadastro no Simples Dental",
+  "version": "1.0.0",
+  "description": "Preenche Novo paciente no Simples Dental com os dados enviados pelo painel da Secretária IA. Nao salva sozinha.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["https://app.simplesdental.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://doutoragente.2.25.255.233.sslip.io/*"],
+      "js": ["painel.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://app.simplesdental.com/*"],
+      "js": ["simples.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

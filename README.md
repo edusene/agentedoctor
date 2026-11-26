@@ -129,9 +129,11 @@ emergências, cada resposta travada, a conferência das respostas do modelo, o
 fluxo completo até o encaminhamento e a ausência de oscilação: a mesma conversa
 rodada 25 vezes tem de dar exatamente as mesmas respostas.
 
-## Cadastro no Simples Dental (semiautomático)
+## Cadastro no Simples Dental (extensão do Chrome)
 
-Na aba **Pacientes** (lista no estilo do Simples Dental, com busca por nome, CPF ou celular), no detalhe do agendamento e na própria confirmação do horário (caixa marcada por padrão), **Enviar ao Simples Dental** copia o cadastro e abre o Simples Dental. O atalho de favoritos (`static/simples_dental.js`, arrastado do painel, botão "Atalho do Simples Dental") preenche "Novo paciente" no Simples Dental já logado; a secretária confere e salva. Não há senha nem chamada de servidor. O CEP preenche rua, bairro, cidade e estado; sexo e dados do responsável ficam em branco (o roteiro do doutor não pergunta).
+Na aba **Pacientes** (lista no estilo do Simples Dental), no detalhe do agendamento e na confirmação do horário (caixa marcada por padrão), **Enviar ao Simples Dental** manda o cadastro para a extensão `extensao_simples_dental/`. Ela abre o Simples Dental (já logado pela secretária), abre "Novo paciente" e preenche; a secretária confere e clica em Salvar (a extensão nunca salva). O CEP preenche rua, bairro, cidade e estado; sexo e dados do responsável ficam em branco (o roteiro do doutor não pergunta). Sem senha e sem chamada de servidor: os dados passam só pelo navegador.
+
+Instalar (uma vez por computador): copie a pasta, abra `chrome://extensions`, ligue o Modo do desenvolvedor e use "Carregar sem compactação". O endereço do painel está em `manifest.json` (`matches`): se o domínio mudar, atualize lá e recarregue a extensão.
 
 ## Documentação
 

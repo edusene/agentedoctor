@@ -1600,7 +1600,7 @@ function filtrarPacientes() {
             <td>${esc(p.phone)}</td>
             <td>${esc(consulta)}</td>
             <td class="table-actions">
-                <button class="btn-simples btn-simples-sm" title="Copia o cadastro e abre o Simples Dental" onclick="enviarPacienteSimples(${p.id})">${ICONE_SIMPLES} Simples Dental</button>
+                <button class="btn-simples btn-simples-sm" title="Abre o Simples Dental e preenche o cadastro" onclick="enviarPacienteSimples(${p.id})">${ICONE_SIMPLES} Simples Dental</button>
                 <button class="btn-sm btn-secondary" onclick="editContact(${p.id})">Editar</button>
                 <button class="btn-sm btn-danger" onclick="deleteContact(${p.id})">Excluir</button>
             </td>
@@ -3707,16 +3707,14 @@ async function detalheAgendamento(agId) {
             </div>
             <div class="sd-envio">
                 <button class="btn-simples" onclick="enviarAgendamentoSimples(${a.id})">${ICONE_SIMPLES} Enviar ao Simples Dental</button>
-                <button class="btn-link-sd" onclick="abrirAtalhoSimplesDental()">Como funciona / instalar atalho</button>
+                <button class="btn-link-sd" onclick="abrirAtalhoSimplesDental()">Como instalar a extensão</button>
             </div>
         </div>`;
     document.getElementById('modal-overlay').style.display = 'flex';
 }
 
-// ── Simples Dental ───────────────────────────────────────────────────────────
-// "Enviar" copia o cadastro e abre o Simples Dental; o atalho de favoritos
-// (static/simples_dental.js) preenche "Novo paciente" e a secretaria salva.
-const SIMPLES_DENTAL_URL = 'https://app.simplesdental.com/simples/pacientes';
+// "Enviar" passa o cadastro para a extensao do Chrome (extensao_simples_dental/),
+// que abre o Simples Dental e preenche "Novo paciente"; a secretaria salva.
 const ICONE_SIMPLES = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v10"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>';
 
 function dadosSimplesDental(nome, phone, f) {
@@ -3729,11 +3727,15 @@ function dadosSimplesDental(nome, phone, f) {
 }
 
 async function enviarSimplesDental(dados) {
-    try {
-        await navigator.clipboard.writeText(JSON.stringify(dados));
-    } catch (e) { toast('O navegador não deixou copiar os dados', 'error'); return; }
-    window.open(SIMPLES_DENTAL_URL, 'simplesdental');
-    toast('Dados copiados. No Simples Dental, clique no atalho "Preencher Simples Dental".', 'success');
+    if (document.documentElement.dataset.extensaoSd) {
+        // A extensao abre o Simples Dental e preenche; a secretaria so confere e salva.
+        window.postMessage({ tipo: 'agentedoctor-simples', dados }, location.origin);
+        toast('Abrindo o Simples Dental e preenchendo o cadastro...', 'success');
+        return;
+    }
+    try { await navigator.clipboard.writeText(JSON.stringify(dados)); } catch (e) { /* sem copia */ }
+    toast('Extensão do Simples Dental não instalada neste navegador.', 'error');
+    abrirAtalhoSimplesDental();
 }
 
 async function enviarAgendamentoSimples(agId) {
@@ -3742,18 +3744,17 @@ async function enviarAgendamentoSimples(agId) {
     enviarSimplesDental(dadosSimplesDental(a.nome, a.phone, a.ficha));
 }
 
-async function abrirAtalhoSimplesDental() {
-    let href = '#';
-    try { href = 'javascript:' + encodeURIComponent(await (await fetch('/static/simples_dental.js')).text()); } catch (e) { /* sem atalho */ }
-    document.getElementById('modal-title').textContent = 'Atalho do Simples Dental';
+function abrirAtalhoSimplesDental() {
+    const ativa = !!document.documentElement.dataset.extensaoSd;
+    document.getElementById('modal-title').textContent = 'Extensão do Simples Dental';
     document.getElementById('modal-body').innerHTML = `
-        <ol class="sd-passos">
-            <li><strong>Uma vez por computador:</strong> arraste o botão abaixo para a barra de favoritos do Chrome (Ctrl+Shift+B mostra a barra).</li>
-            <li>Clique em <strong>Enviar ao Simples Dental</strong> no paciente. Os dados são copiados e o Simples Dental abre.</li>
-            <li>Já logado no Simples Dental, clique no favorito <strong>Preencher Simples Dental</strong> e permita ler a área de transferência.</li>
-            <li>Confira o formulário e clique em <strong>Salvar</strong>. O atalho nunca salva sozinho.</li>
-        </ol>
-        <div class="sd-envio"><a class="btn-simples" href="${href}" onclick="return false" title="Arraste para a barra de favoritos">${ICONE_SIMPLES} Preencher Simples Dental</a></div>`;
+        <p>${ativa ? '<strong>Extensão instalada neste navegador.</strong> Clique em Simples Dental e o cadastro é preenchido sozinho; você confere e clica em Salvar.' : 'Instale uma vez em cada computador que vai enviar cadastros:'}</p>
+        ${ativa ? '' : `<ol class="sd-passos">
+            <li>Copie a pasta <code>extensao_simples_dental</code> do projeto para o computador.</li>
+            <li>No Chrome, abra <code>chrome://extensions</code> e ligue o <strong>Modo do desenvolvedor</strong>.</li>
+            <li>Clique em <strong>Carregar sem compactação</strong> e escolha a pasta.</li>
+            <li>Entre no Simples Dental neste Chrome e recarregue este painel (F5).</li>
+        </ol>`}`;
     document.getElementById('modal-overlay').style.display = 'flex';
 }
 
