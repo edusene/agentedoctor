@@ -3733,8 +3733,15 @@ window.addEventListener('message', (e) => {
         toast(e.data.texto, e.data.erro ? 'error' : 'success');
 });
 
+const SD_EXTENSAO_VERSAO = '1.1.0';
+
 async function enviarSimplesDental(dados) {
-    if (document.documentElement.dataset.extensaoSd) {
+    const versao = document.documentElement.dataset.extensaoSd;
+    if (versao && versao !== SD_EXTENSAO_VERSAO) {
+        toast('Extensão desatualizada. Em chrome://extensions clique em atualizar na extensão, recarregue este painel (F5) e envie de novo.', 'error');
+        return;
+    }
+    if (versao) {
         // A extensao abre o Simples Dental e preenche; a secretaria so confere e salva.
         window.postMessage({ tipo: 'agentedoctor-simples', dados }, location.origin);
         toast('Abrindo o Simples Dental e preenchendo o cadastro...', 'success');
