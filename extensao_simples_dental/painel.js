@@ -5,13 +5,18 @@ document.documentElement.dataset.extensaoSd = chrome.runtime.getManifest().versi
 window.addEventListener("message", (e) => {
   if (e.source !== window || !e.data || e.data.tipo !== "agentedoctor-simples") return;
   // Depois de atualizar a extensao, esta copia fica sem ligacao com ela: so F5 resolve.
-  if (!chrome.runtime || !chrome.runtime.id) {
-    window.postMessage({ tipo: "agentedoctor-simples-recarregar" }, location.origin);
-    return;
+  // Qualquer falha vira aviso no painel em vez de erro escondido na pagina de extensoes.
+  const recarregar = (motivo) =>
+    window.postMessage({ tipo: "agentedoctor-simples-recarregar", motivo }, location.origin);
+  try {
+    if (!chrome.runtime || !chrome.runtime.id) return recarregar("sem ligação com a extensão");
+    chrome.storage.local.set({ pendente: { dados: e.data.dados, quando: Date.now() } }, () => {
+      if (chrome.runtime.lastError) return recarregar(chrome.runtime.lastError.message);
+      chrome.runtime.sendMessage({ tipo: "abrir" }, () => void chrome.runtime.lastError);
+    });
+  } catch (erro) {
+    recarregar(String(erro && erro.message || erro));
   }
-  chrome.storage.local.set({ pendente: { dados: e.data.dados, quando: Date.now() } }, () => {
-    chrome.runtime.sendMessage({ tipo: "abrir" });
-  });
 });
 
 // Resultado do cadastro (cadastrado, ja existia...) volta ate a tela do painel.

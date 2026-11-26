@@ -3728,12 +3728,12 @@ function dadosSimplesDental(nome, phone, f) {
 
 window.addEventListener('message', (e) => {
     if (e.source === window && e.data && e.data.tipo === 'agentedoctor-simples-recarregar')
-        toast('A extensão foi atualizada: recarregue este painel (F5) e envie de novo.', 'error');
+        toast('A extensão não respondeu (' + (e.data.motivo || 'sem motivo') + '). Recarregue este painel (F5) e envie de novo.', 'error');
     if (e.source === window && e.data && e.data.tipo === 'agentedoctor-simples-resultado')
         toast(e.data.texto, e.data.erro ? 'error' : 'success');
 });
 
-const SD_EXTENSAO_VERSAO = '1.1.0';
+const SD_EXTENSAO_VERSAO = '1.1.1';
 
 async function enviarSimplesDental(dados) {
     const versao = document.documentElement.dataset.extensaoSd;
